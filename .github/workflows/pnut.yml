@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# pnut-labs: the checks on every pull request to this fork, in place of
+# upstream's workflows, which are disabled here.  It builds the
+# configurations pnut-os relies on, and checks the style of what a pull
+# request changes with NuttX's checkpatch.sh.
+
+name: pnut
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+# A newer push to the same pull request cancels the older run; every
+# push to master is checked
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Espressif's toolchain and esptool, pinned; bump them deliberately.  GCC
+# 15 does not build the ESP HAL of NuttX 13.1, so the toolchain stays at 14.
+
+env:
+  XTENSA_GCC: esp-14.2.0_20260121
+  XTENSA_GCC_SHA256: da31f36d79d4e99f24e55a90a71e65d5694714f16199960bf7885724b706a48c
+  ESPTOOL: 5.4.0
+
+jobs:
+  build:
+    name: build (${{ matrix.config }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - sim:nsh
+          - esp32s3-devkit:nsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: nuttx
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pnut-labs/nuttx-apps
+          path: apps
+          persist-credentials: false
+
+      - name: Install the host's tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kconfig-frontends genromfs xxd zlib1g-dev
+
+      - name: Install Espressif's toolchain and esptool
+        if: ${{ !startsWith(matrix.config, 'sim:') }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install "esptool==$ESPTOOL"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          version=${XTENSA_GCC#esp-}
+          curl -fsSL -o "$RUNNER_TEMP/xtensa.tar.xz" \
+            "https://github.com/espressif/crosstool-NG/releases/download/$XTENSA_GCC/xtensa-esp-elf-$version-x86_64-linux-gnu.tar.xz"
+          echo "$XTENSA_GCC_SHA256  $RUNNER_TEMP/xtensa.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/xtensa.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xtensa-esp-elf/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        working-directory: nuttx
+        env:
+          CONFIG: ${{ matrix.config }}
+        run: |
+          ./tools/configure.sh -l "$CONFIG"
+          make -j"$(nproc)"
+
+  # One check to require, whatever the list of configurations
+
+  builds:
+    name: builds
+    needs: build
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every configuration built
+        env:
+          RESULT: ${{ needs.build.result }}
+        run: test "$RESULT" = success
+
+  style:
+    name: style
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # checkpatch.sh checks Python and CMake files with these, and fails
+      # when one is missing
+
+      - name: Install the checkers
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install black==26.10.0 isort==9.0.2 \
+            flake8==7.4.1 cmake-format==0.6.13
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check the pull request's changes
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          echo "::add-matcher::.github/nxstyle.json"
+          ./tools/checkpatch.sh -g "$BASE..HEAD"
