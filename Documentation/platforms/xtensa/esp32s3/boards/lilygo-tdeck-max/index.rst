@@ -42,7 +42,8 @@ The port is being written part by part.  Supported so far:
 
 * NSH on the USB Serial/JTAG console;
 * the 8 MB PSRAM, added to the heap;
-* ``reboot``.
+* ``reboot``;
+* the I2C bus, and the XL9555's lines as GPIO devices (``full``).
 
 Serial Console
 ==============
@@ -51,6 +52,10 @@ NSH runs on the ESP32-S3's **USB Serial/JTAG** unit, which enumerates on
 the computer as ``/dev/ttyACM0`` (Linux, USB ID ``303a:1001``); no
 USB-to-UART bridge is involved.  The two UARTs are left for the GNSS
 receiver (UART1) and the modem (UART2).
+
+The ESP32-S3's low-level console output (``up_putc()``) does not reach the
+USB Serial/JTAG unit, so the system log does not appear on the console.
+``full`` keeps it in a RAM log instead, read with ``dmesg``.
 
 Buttons
 =======
@@ -113,9 +118,47 @@ anything on the bus is touched: a chip select held low on the unpowered
 SX1262 loads the bus, and the e-paper stops answering.  The e-paper's reset
 is released and the SX1262's held, and both lights are switched off.
 
-The SX1262's power rail, on the XL9555, is off until a configuration
-drives the expander, and ``nsh`` does not.  Meanwhile its high chip select
-feeds the radio, about 15 mA.
+The SX1262's power rail is on the XL9555 (below).  ``nsh`` does not drive
+the expander, so the rail is not switched on, and the radio's high chip
+select feeds it about 15 mA.  ``full`` switches the rail on.
+
+Power rails
+===========
+
+Nearly every part is powered through the XL9555 I/O expander (I2C,
+address ``0x20``), driven with NuttX's PCA9555 driver.  In ``full`` each
+line the board uses is a GPIO device, ``/dev/<name>``, set at every start;
+use
+``gpio -o 0|1 /dev/<name>``:
+
+================= ======= =================================================
+Device            XL9555  Line (level at start)
+================= ======= =================================================
+``modem_pwr``     P00     the A7682E's supply (off)
+``lora_en``       P01     the SX1262's supply (on)
+``gps_en``        P02     the MIA-M10Q's supply (off)
+``imu_en``        P03     the BHI260AP's 1.8 V supply (on)
+``lora_ant``      P04     high: internal antenna, low: external (internal)
+``motor_en``      P05     the DRV2605L's supply (on)
+``amp_en``        P06     the speaker amplifier (off)
+``touch_rst``     P07     the CST3530's reset, active low (released)
+``modem_pwrkey``  P10     high presses the modem's power key (released)
+``key_rst``       P11     the TCA8418's reset, active low (released)
+``audio_sel``     P12     high: the modem's audio, low: the codec's (codec)
+================= ======= =================================================
+
+* **The XL9555 keeps its outputs across a reset of the ESP32-S3.**  The
+  modem's supply is therefore left on if it is already driven on at start,
+  since cutting it while the modem runs can damage the modem's flash; the
+  log says so.  At power-up the lines are inputs, pulled up: the modem's
+  power key is set first, so that it is not held pressed.
+* **The SX1262's reset follows its supply:** held while the supply is
+  off, so that it does not feed the unpowered chip, and released once it is
+  on.  With the supply on, the radio idles in standby.
+* The IMU's and the motor driver's supplies are on, and the touch and
+  keyboard controllers out of reset, so that every part on the I2C bus
+  answers (``i2c dev 0x08 0x77``).  The BQ27220 fuel gauge (``0x55``) does
+  not yet: it stretches the clock longer than the I2C driver waits.
 
 Configurations
 ==============
@@ -130,6 +173,17 @@ The module's PSRAM runs in **quad** mode (``ESP32S3_SPIRAM_MODE_QUAD``, the
 default), although the help text of its Kconfig entry describes an octal
 one: octal mode would also take GPIO 33 to 37, which the board uses for the
 SPI bus and the e-paper.
+
+full
+----
+
+Every part the port supports so far, without demonstrations: ``nsh``, plus
+the I2C bus (``/dev/i2c0``, the ``i2c`` command), the XL9555's lines as GPIO
+devices (the ``gpio`` command), and the system log in a 4 KB RAM log
+(``dmesg``).  The RAM log is not cleared by a reset, so the dump of a crash
+is still there after the board restarts; each start is marked with its
+reset reason (1 is a power-up, 3 a software reset, 21 a reset over USB,
+as ``esptool`` does).
 
 Debugging
 =========

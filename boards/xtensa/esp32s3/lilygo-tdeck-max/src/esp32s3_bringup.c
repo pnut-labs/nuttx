@@ -29,6 +29,13 @@
 #include <syslog.h>
 
 #include <nuttx/fs/fs.h>
+#include <nuttx/i2c/i2c_master.h>
+
+#ifdef CONFIG_ESP32S3_I2C
+#  include "esp32s3_i2c.h"
+#endif
+
+#include "esp32s3_reset_reasons.h"
 
 #include "lilygo-tdeck-max.h"
 
@@ -49,7 +56,17 @@
 
 int esp32s3_bringup(void)
 {
+#ifdef CONFIG_ESP32S3_I2C0
+  FAR struct i2c_master_s *i2c;
+#endif
   int ret = OK;
+
+  /* Mark each start: a RAM log in .noinit keeps the starts before it, and
+   * holds random bytes after a power-up until something is written.
+   */
+
+  syslog(LOG_INFO, "Started (reset reason %d)\n",
+         (int)esp32s3_reset_reasons(0));
 
 #ifdef CONFIG_FS_PROCFS
   ret = nx_mount(NULL, "/proc", "procfs", 0, NULL);
@@ -65,6 +82,35 @@ int esp32s3_bringup(void)
     {
       syslog(LOG_ERR, "ERROR: Failed to mount tmpfs at %s: %d\n",
              CONFIG_LIBC_TMPDIR, ret);
+    }
+#endif
+
+#ifdef CONFIG_ESP32S3_I2C0
+  /* The I2C bus, and on it the XL9555, which powers most of the board */
+
+  i2c = esp32s3_i2cbus_initialize(0);
+  if (i2c == NULL)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize I2C0\n");
+    }
+  else
+    {
+#  ifdef CONFIG_I2C_DRIVER
+      ret = i2c_register(i2c, 0);
+      if (ret < 0)
+        {
+          syslog(LOG_ERR, "ERROR: Failed to register /dev/i2c0: %d\n", ret);
+        }
+#  endif
+
+#  ifdef CONFIG_IOEXPANDER_PCA9555
+      ret = tdeck_xl9555_initialize(i2c);
+      if (ret < 0)
+        {
+          syslog(LOG_ERR, "ERROR: Failed to initialize the XL9555: %d\n",
+                 ret);
+        }
+#  endif
     }
 #endif
 

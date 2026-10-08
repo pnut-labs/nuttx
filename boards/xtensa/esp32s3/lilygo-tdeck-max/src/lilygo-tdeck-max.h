@@ -30,6 +30,24 @@
 #include <nuttx/config.h>
 
 /****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+/* The XL9555's lines: 0 to 7 are P00 to P07, 8 to 15 are P10 to P17 */
+
+#define XL9555_MODEM_PWR      0   /* High powers the A7682E */
+#define XL9555_LORA_EN        1   /* High powers the SX1262 */
+#define XL9555_GPS_EN         2   /* High powers the MIA-M10Q */
+#define XL9555_IMU_1V8_EN     3   /* High powers the BHI260AP's 1.8 V */
+#define XL9555_LORA_ANT       4   /* High selects the internal antenna */
+#define XL9555_MOTOR_EN       5   /* High powers the DRV2605L */
+#define XL9555_AMP_EN         6   /* High enables the speaker amplifier */
+#define XL9555_TOUCH_RST      7   /* Low resets the CST3530 */
+#define XL9555_MODEM_PWRKEY   8   /* High presses the modem's power key */
+#define XL9555_KEY_RST        9   /* Low resets the TCA8418 */
+#define XL9555_AUDIO_SEL      10  /* High: the modem's audio; low: codec */
+
+/****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
 
@@ -45,6 +63,20 @@
  ****************************************************************************/
 
 int esp32s3_bringup(void);
+
+/****************************************************************************
+ * Name: tdeck_xl9555_initialize
+ *
+ * Description:
+ *   Set every line of the XL9555 I/O expander to its level at start, and
+ *   register each as /dev/<name>.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_IOEXPANDER_PCA9555
+struct i2c_master_s;
+int tdeck_xl9555_initialize(FAR struct i2c_master_s *i2c);
+#endif
 
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_XTENSA_ESP32S3_LILYGO_TDECK_MAX_SRC_LILYGO_TDECK_MAX_H */
