@@ -625,6 +625,14 @@ config ARCH_BOARD_ESP32S3_LCKFB_SZPI
 	select ARCH_HAVE_BUTTONS
 	select ARCH_HAVE_IRQBUTTONS if ESPRESSIF_GPIO_IRQ
 
+config ARCH_BOARD_LILYGO_TDECK_MAX
+	bool "LilyGo T-Deck Max (ESP32-S3)"
+	depends on ARCH_CHIP_ESP32S3WROOM1N16R8
+	---help---
+		The LilyGo T-Deck Max is a handheld built around an ESP32-S3 with
+		16 MB flash and 8 MB PSRAM: a 3.1" e-paper screen, a keyboard,
+		touch, an LTE modem, a LoRa radio, GNSS and audio.
+
 config ARCH_BOARD_ESP32S3_TOUCH_LCD_7
 	bool "Waveshare ESP32-S3-Touch-LCD-7"
 	depends on ARCH_CHIP_ESP32S3WROOM1N16R8
@@ -3915,6 +3923,7 @@ config ARCH_BOARD
 	default "esp32s3-box"                  if ARCH_BOARD_ESP32S3_BOX
 	default "esp32s3-korvo-2"              if ARCH_BOARD_ESP32S3_KORVO_2
 	default "lckfb-szpi-esp32s3"           if ARCH_BOARD_ESP32S3_LCKFB_SZPI
+	default "lilygo-tdeck-max"             if ARCH_BOARD_LILYGO_TDECK_MAX
 	default "esp32s3-touch-lcd7"           if ARCH_BOARD_ESP32S3_TOUCH_LCD_7
 	default "esp32s3-ws-lcd128"            if ARCH_BOARD_ESP32S3_WS_LCD128
 	default "esp32c6-devkitc"              if ARCH_BOARD_ESP32C6_DEVKITC
@@ -5309,6 +5318,9 @@ source "boards/xtensa/esp32s3/esp32s3-korvo-2/Kconfig"
 endif
 if ARCH_BOARD_ESP32S3_LCKFB_SZPI
 source "boards/xtensa/esp32s3/lckfb-szpi-esp32s3/Kconfig"
+endif
+if ARCH_BOARD_LILYGO_TDECK_MAX
+source "boards/xtensa/esp32s3/lilygo-tdeck-max/Kconfig"
 endif
 #if ARCH_BOARD_ESP32C6_DEVKITC
 #source "boards/risc-v/esp32c6/esp32c6-devkitc/Kconfig"
