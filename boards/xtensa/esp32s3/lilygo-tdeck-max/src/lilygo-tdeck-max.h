@@ -78,5 +78,17 @@ struct i2c_master_s;
 int tdeck_xl9555_initialize(FAR struct i2c_master_s *i2c);
 #endif
 
+/****************************************************************************
+ * Name: tdeck_lora_sleep
+ *
+ * Description:
+ *   Put the SX1262 to sleep, once its rail is on.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_ESP32S3_SPI2
+int tdeck_lora_sleep(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_XTENSA_ESP32S3_LILYGO_TDECK_MAX_SRC_LILYGO_TDECK_MAX_H */
