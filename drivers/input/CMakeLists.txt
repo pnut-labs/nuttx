@@ -139,6 +139,10 @@ if(CONFIG_INPUT)
     list(APPEND SRCS spq10kbd.c)
   endif()
 
+  if(CONFIG_INPUT_TCA8418)
+    list(APPEND SRCS tca8418.c)
+  endif()
+
   if(CONFIG_INPUT_GOLDFISH_EVENTS)
     list(APPEND SRCS goldfish_events.c)
   endif()

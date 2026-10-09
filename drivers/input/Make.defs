@@ -127,6 +127,10 @@ ifeq ($(CONFIG_INPUT_SPQ10KBD),y)
   CSRCS += spq10kbd.c
 endif
 
+ifeq ($(CONFIG_INPUT_TCA8418),y)
+  CSRCS += tca8418.c
+endif
+
 ifeq ($(CONFIG_INPUT_KMATRIX),y)
   CSRCS += kmatrix.c
 endif

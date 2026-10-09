@@ -79,6 +79,20 @@ int tdeck_xl9555_initialize(FAR struct i2c_master_s *i2c);
 #endif
 
 /****************************************************************************
+ * Name: tdeck_keyboard_initialize
+ *
+ * Description:
+ *   Register the keyboard as /dev/kbd0, once the XL9555 has released its
+ *   reset.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_INPUT_TCA8418
+struct i2c_master_s;
+int tdeck_keyboard_initialize(FAR struct i2c_master_s *i2c);
+#endif
+
+/****************************************************************************
  * Name: tdeck_lora_sleep
  *
  * Description:

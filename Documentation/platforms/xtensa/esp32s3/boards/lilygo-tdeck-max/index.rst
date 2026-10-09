@@ -45,7 +45,8 @@ The port is being written part by part.  Supported so far:
 * ``reboot``;
 * the I2C bus, and the XL9555's lines as GPIO devices (``full``);
 * the SPI bus, the e-paper as ``/dev/fb0``, and both lights as
-  ``/dev/pwm0`` (``full``).
+  ``/dev/pwm0`` (``full``);
+* the keyboard as ``/dev/kbd0`` (``full``).
 
 Serial Console
 ==============
@@ -189,6 +190,33 @@ The UC8253 controller is driven by ``drivers/lcd/uc8253.c`` and seen as
 * Powering the panel down (``FBIOSET_POWER``) puts the controller in deep
   sleep; the glass keeps the image.
 
+Keyboard
+========
+
+The keyboard is a BlackBerry Q20's: a 4 × 10 matrix scanned by a TCA8418
+(I2C ``0x34``, interrupt on GPIO 15, reset on the XL9555's ``key_rst``),
+driven by ``drivers/input/tca8418.c`` and seen as ``/dev/kbd0`` through
+NuttX's keyboard upper half.
+
+* Characters arrive as they are printed on the keys: Shift for capitals,
+  Alt (left of Z) for the digits and symbols.  A modifier held applies to
+  the keys pressed meanwhile; tapped, to the next key; tapped twice, until
+  it is tapped again.
+* Enter, Backspace and Sym (right of Space) are special keys:
+  ``KEYCODE_ENTER``, ``KEYCODE_BACKDEL`` and ``KEYCODE_FIND``.
+* Shift and Alt are reported as ``KEYCODE_LSHIFT`` and ``KEYCODE_LALT``,
+  pressed when they take effect and released when they end, so that a
+  reader can tell what a key was pressed with.
+* The matrix's columns are wired in reverse, and the key the vendor calls
+  "UP" (the arrow keycaps at both ends of the bottom row) is Shift.
+* The keyboard needs the XL9555 (``IOEXPANDER_PCA9555``), which releases
+  its reset; with ``INPUT_TCA8418`` the board selects the GPIO interrupts
+  it needs (``ESPRESSIF_GPIO_IRQ``).
+
+``kbd`` prints the events::
+
+    nsh> kbd /dev/kbd0 20
+
 Lights
 ======
 
@@ -225,8 +253,9 @@ full
 Every part the port supports so far: ``nsh``, plus the I2C bus
 (``/dev/i2c0``, the ``i2c`` command), the XL9555's lines as GPIO devices
 (the ``gpio`` command), the SPI bus, the e-paper (``/dev/fb0``, the ``fb``
-test pattern), both lights (``/dev/pwm0``, the ``pwm`` command), and the
-system log in a 4 KB RAM log (``dmesg``).  The RAM log is not cleared by
+test pattern), both lights (``/dev/pwm0``, the ``pwm`` command), the
+keyboard (``/dev/kbd0``, the ``kbd`` command), and the system log in a
+4 KB RAM log (``dmesg``).  The RAM log is not cleared by
 a reset, so the dump of a crash is still there after the board restarts;
 each start is marked with its reset reason (1 is a power-up, 3 a software
 reset, 21 a reset over USB, as ``esptool`` does).
