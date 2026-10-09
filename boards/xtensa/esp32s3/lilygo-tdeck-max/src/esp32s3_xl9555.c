@@ -83,9 +83,9 @@ struct tdeck_line_s
  ****************************************************************************/
 
 static void tdeck_lora_powered(bool on);
-static int tdeck_line_set(FAR struct tdeck_line_s *line, bool on);
 
 #ifdef CONFIG_DEV_GPIO
+static int tdeck_line_set(FAR struct tdeck_line_s *line, bool on);
 static int tdeck_line_read(FAR struct gpio_dev_s *dev, FAR bool *value);
 static int tdeck_line_write(FAR struct gpio_dev_s *dev, bool value);
 static int tdeck_line_setpintype(FAR struct gpio_dev_s *dev,
@@ -145,9 +145,11 @@ static struct pca9555_config_s g_xl9555_config =
 
 static FAR struct ioexpander_dev_s *g_xl9555;
 
+#ifdef CONFIG_DEV_GPIO
 /* Held while a line and the lines of its part change together */
 
 static mutex_t g_lock = NXMUTEX_INITIALIZER;
+#endif
 
 #ifdef CONFIG_DEV_GPIO
 static const struct gpio_operations_s g_line_ops =
@@ -180,6 +182,7 @@ static void tdeck_lora_powered(bool on)
   esp_gpiowrite(BOARD_LORA_RST, on);
 }
 
+#ifdef CONFIG_DEV_GPIO
 /****************************************************************************
  * Name: tdeck_line_set
  *
@@ -212,6 +215,7 @@ static int tdeck_line_set(FAR struct tdeck_line_s *line, bool on)
   nxmutex_unlock(&g_lock);
   return ret < 0 ? ret : OK;
 }
+#endif
 
 /****************************************************************************
  * Name: tdeck_modem_driven
