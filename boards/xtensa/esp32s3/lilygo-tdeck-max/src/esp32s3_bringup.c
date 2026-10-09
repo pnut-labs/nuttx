@@ -118,9 +118,9 @@ int esp32s3_bringup(void)
           syslog(LOG_ERR, "ERROR: Failed to initialize the XL9555: %d\n",
                  ret);
         }
-#    ifdef CONFIG_ESP32S3_SPI2
       else
         {
+#    ifdef CONFIG_ESP32S3_SPI2
           /* The XL9555 has powered the LoRa radio: put it to sleep until
            * a driver wants it.
            */
@@ -132,8 +132,20 @@ int esp32s3_bringup(void)
                      "ERROR: Failed to put the SX1262 to sleep: %d\n",
                      ret);
             }
-        }
 #    endif
+
+#    ifdef CONFIG_INPUT_TCA8418
+          /* The XL9555 has released the keyboard's reset */
+
+          ret = tdeck_keyboard_initialize(i2c);
+          if (ret < 0)
+            {
+              syslog(LOG_ERR,
+                     "ERROR: Failed to initialize the keyboard: %d\n",
+                     ret);
+            }
+#    endif
+        }
 #  endif
     }
 #endif

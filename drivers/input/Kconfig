@@ -792,6 +792,27 @@ config SPQ10KBD_NPOLLWAITERS
 
 endif # INPUT_SPQ10KBD
 
+config INPUT_TCA8418
+	bool "TI TCA8418 I2C keypad scanner"
+	default n
+	select I2C
+	select INPUT_KEYBOARD
+	select SCHED_HPWORK
+	---help---
+		The TI TCA8418, which scans a matrix of up to 8 rows by 10
+		columns and reports presses and releases over I2C, seen as a
+		keyboard at /dev/kbdN.  The board supplies the keymap, in layers
+		for Shift and Alt.
+
+if INPUT_TCA8418
+
+config INPUT_TCA8418_BUFSIZE
+	int "Events buffered for readers"
+	default 16
+	range 1 255
+
+endif # INPUT_TCA8418
+
 config INPUT_KMATRIX
 	bool "Keyboard Matrix Driver"
 	default n
