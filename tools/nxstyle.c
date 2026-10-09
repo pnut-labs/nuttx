@@ -1939,11 +1939,14 @@ int main(int argc, char **argv, char **envp)
 
                       free(line_dup);
                     }
-                  else if (strncmp(&line[n + 2], apps_dir, apps_len) != 0)
+                  else if (line[n + 2] == '/' || line[n + 2] == '.' ||
+                           strchr(&line[n + 2], '/') == NULL)
                     {
-                      /* g_file_name neither belongs to "nuttx" repository
-                       * nor begins with the root dir of the other
-                       * repository (e.g. "apps/")
+                      /* g_file_name does not belong to the "nuttx"
+                       * repository, and its path is absolute, relative to
+                       * the current dir, or a bare file name: it must
+                       * begin with the root dir of its own repository
+                       * (e.g. "apps/")
                        */
 
                       ERROR("Path relative to repository other than \"nuttx\" "
@@ -1965,6 +1968,19 @@ int main(int argc, char **argv, char **envp)
 
                           offset += apps_len;
                         }
+#ifdef TOPDIR
+                      else
+                        {
+                          /* Input file belongs to another repository: its
+                           * path begins with that repository's root dir,
+                           * whose name may differ from the checkout's.
+                           * Compare what follows it.
+                           */
+
+                          offset = strchr(&line[n + 2], '/') -
+                                   &line[n + 2] + 1;
+                        }
+#endif
 
                       /* Duplicate the line from the beginning of the
                        * relative file path, removing the '\n' at the end of
