@@ -20,21 +20,26 @@
 
 # Files laid over the board's ROMFS at CONFIG_ETC_ROMFSMOUNTPT by whoever
 # builds NuttX: ETC_OVERLAY, given on make's command line (it reaches the
-# board's build through MAKEFLAGS), names a directory, by an absolute path,
-# whose tree is the ROMFS's (init.d/x.rc for /etc/init.d/x.rc).  Its *.rc
-# files are preprocessed as the board's are, the others copied as they are,
-# dotfiles left out; a file the board has too is the overlay's, except the
-# passwd file the board may generate.  It needs CONFIG_ETC_ROMFS.  A file
-# removed from the overlay stays in the ROMFS until "make clean".  Make
-# only: the CMake build has hooks of its own (cmake/nuttx_add_romfs.cmake).
+# board's build through MAKEFLAGS), names a directory, or a symbolic link
+# to one, by an absolute path, whose tree is the ROMFS's (init.d/x.rc for
+# /etc/init.d/x.rc).  Its *.rc files are preprocessed as the board's are,
+# the others copied as they are; dotfiles and dot directories are left
+# out.  A file the board has too is the overlay's, except the passwd file
+# the board may generate.  It needs CONFIG_ETC_ROMFS.  A file removed from
+# the overlay stays in the ROMFS until "make clean".  Make only: the CMake
+# build has hooks of its own (cmake/nuttx_add_romfs.cmake).
 
 ifneq ($(ETC_OVERLAY),)
+ifeq ($(filter /%,$(ETC_OVERLAY)),)
+$(error ETC_OVERLAY: $(ETC_OVERLAY) is not an absolute path)
+endif
+override ETC_OVERLAY := $(abspath $(ETC_OVERLAY))
 ifeq ($(wildcard $(ETC_OVERLAY)/.),)
 $(error ETC_OVERLAY: $(ETC_OVERLAY) is not a directory)
 endif
 ifeq ($(CONFIG_ETC_ROMFS),y)
 ETCMOUNT     := $(patsubst "%",%,$(CONFIG_ETC_ROMFSMOUNTPT))
-OVERLAYFILES := $(patsubst $(ETC_OVERLAY)/%,%,$(shell find $(ETC_OVERLAY) -type f ! -name '.*' 2> /dev/null))
+OVERLAYFILES := $(patsubst $(ETC_OVERLAY)/%,%,$(shell find -H $(ETC_OVERLAY) -mindepth 1 -name '.*' -prune -o -type f -print 2> /dev/null))
 OVERLAYRCS   := $(filter %.rc,$(OVERLAYFILES))
 OVERLAYRAWS  := $(filter-out %.rc,$(OVERLAYFILES))
 endif
