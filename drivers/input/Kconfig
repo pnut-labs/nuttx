@@ -190,6 +190,38 @@ config INPUT_ST7123_I2C_ADDRESS
 
 endif # INPUT_ST7123
 
+config INPUT_CST3530
+	bool "Hynitron CST3530 touchscreen controller"
+	default n
+	select I2C
+	select INPUT_TOUCHSCREEN
+	select INPUT_KEYBOARD
+	select SCHED_HPWORK
+	---help---
+		The Hynitron CST3530 capacitive touch controller, and the CST66xx
+		parts that speak its protocol, seen as a touchscreen, with the
+		touch keys on the glass, if the board has any, seen as a keyboard.
+		The controller sleeps while neither device is open.
+
+if INPUT_CST3530
+
+config INPUT_CST3530_BUFSIZE
+	int "Samples and key events buffered for readers"
+	default 8
+	range 1 255
+
+config INPUT_CST3530_PRESSURE_STEP
+	int "Pressure change reported for a touch at rest"
+	default 4
+	range 1 255
+	---help---
+		The controller goes on reporting a finger on the glass, and the
+		pressure of one held still wavers by a step or two.  A touch that
+		has not moved is reported again only once its pressure has changed
+		by this much since it was last reported; 1 reports every change.
+
+endif # INPUT_CST3530
+
 config INPUT_MAX11802
 	bool "MAX11802 touchscreen controller"
 	default n

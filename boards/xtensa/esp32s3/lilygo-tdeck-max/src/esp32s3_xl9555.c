@@ -83,9 +83,9 @@ struct tdeck_line_s
  ****************************************************************************/
 
 static void tdeck_lora_powered(bool on);
+static int tdeck_line_set(FAR struct tdeck_line_s *line, bool on);
 
 #ifdef CONFIG_DEV_GPIO
-static int tdeck_line_set(FAR struct tdeck_line_s *line, bool on);
 static int tdeck_line_read(FAR struct gpio_dev_s *dev, FAR bool *value);
 static int tdeck_line_write(FAR struct gpio_dev_s *dev, bool value);
 static int tdeck_line_setpintype(FAR struct gpio_dev_s *dev,
@@ -145,11 +145,9 @@ static struct pca9555_config_s g_xl9555_config =
 
 static FAR struct ioexpander_dev_s *g_xl9555;
 
-#ifdef CONFIG_DEV_GPIO
 /* Held while a line and the lines of its part change together */
 
 static mutex_t g_lock = NXMUTEX_INITIALIZER;
-#endif
 
 #ifdef CONFIG_DEV_GPIO
 static const struct gpio_operations_s g_line_ops =
@@ -182,7 +180,6 @@ static void tdeck_lora_powered(bool on)
   esp_gpiowrite(BOARD_LORA_RST, on);
 }
 
-#ifdef CONFIG_DEV_GPIO
 /****************************************************************************
  * Name: tdeck_line_set
  *
@@ -215,7 +212,6 @@ static int tdeck_line_set(FAR struct tdeck_line_s *line, bool on)
   nxmutex_unlock(&g_lock);
   return ret < 0 ? ret : OK;
 }
-#endif
 
 /****************************************************************************
  * Name: tdeck_modem_driven
@@ -420,4 +416,41 @@ int tdeck_xl9555_initialize(FAR struct i2c_master_s *i2c)
     }
 
   return OK;
+}
+
+/****************************************************************************
+ * Name: tdeck_xl9555_write
+ *
+ * Description:
+ *   Set one of the XL9555's lines, for a driver on the board: the touch
+ *   controller's reset, for one.
+ *
+ * Input Parameters:
+ *   pin - The line, XL9555_*.
+ *   on  - Its level.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; -ENODEV before the XL9555 is set up; -EINVAL
+ *   for a line it does not drive; another negated errno value on failure.
+ *
+ ****************************************************************************/
+
+int tdeck_xl9555_write(uint8_t pin, bool on)
+{
+  size_t i;
+
+  if (g_xl9555 == NULL)
+    {
+      return -ENODEV;
+    }
+
+  for (i = 0; i < nitems(g_lines); i++)
+    {
+      if (g_lines[i].pin == pin)
+        {
+          return tdeck_line_set(&g_lines[i], on);
+        }
+    }
+
+  return -EINVAL;
 }

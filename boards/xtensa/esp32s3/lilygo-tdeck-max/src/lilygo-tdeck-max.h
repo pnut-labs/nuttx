@@ -29,6 +29,9 @@
 
 #include <nuttx/config.h>
 
+#include <stdbool.h>
+#include <stdint.h>
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -79,6 +82,18 @@ int tdeck_xl9555_initialize(FAR struct i2c_master_s *i2c);
 #endif
 
 /****************************************************************************
+ * Name: tdeck_xl9555_write
+ *
+ * Description:
+ *   Set one of the XL9555's lines (XL9555_*), for a driver on the board.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_IOEXPANDER_PCA9555
+int tdeck_xl9555_write(uint8_t pin, bool on);
+#endif
+
+/****************************************************************************
  * Name: tdeck_keyboard_initialize
  *
  * Description:
@@ -90,6 +105,20 @@ int tdeck_xl9555_initialize(FAR struct i2c_master_s *i2c);
 #ifdef CONFIG_INPUT_TCA8418
 struct i2c_master_s;
 int tdeck_keyboard_initialize(FAR struct i2c_master_s *i2c);
+#endif
+
+/****************************************************************************
+ * Name: tdeck_touch_initialize
+ *
+ * Description:
+ *   Register the touch screen as /dev/input0, and the glass keys below it
+ *   as /dev/softkeys, once the XL9555 has released the controller's reset.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_INPUT_CST3530) && defined(CONFIG_IOEXPANDER_PCA9555)
+struct i2c_master_s;
+int tdeck_touch_initialize(FAR struct i2c_master_s *i2c);
 #endif
 
 /****************************************************************************

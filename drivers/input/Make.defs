@@ -50,6 +50,10 @@ ifeq ($(CONFIG_INPUT_TSC2007),y)
   CSRCS += tsc2007.c
 endif
 
+ifeq ($(CONFIG_INPUT_CST3530),y)
+  CSRCS += cst3530.c
+endif
+
 ifeq ($(CONFIG_INPUT_UINPUT),y)
   CSRCS += uinput.c
 endif
