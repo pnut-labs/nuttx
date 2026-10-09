@@ -198,7 +198,7 @@ EXTERN const struct sock_intf_s g_local_sockif;
 
 /* Global protection lock for local socket */
 
-extern mutex_t g_local_lock;
+extern rmutex_t g_local_lock;
 
 /****************************************************************************
  * Inline Functions
@@ -214,7 +214,7 @@ extern mutex_t g_local_lock;
 
 static inline_function void local_lock(void)
 {
-  nxmutex_lock(&g_local_lock);
+  nxrmutex_lock(&g_local_lock);
 }
 
 /****************************************************************************
@@ -227,7 +227,7 @@ static inline_function void local_lock(void)
 
 static inline_function void local_unlock(void)
 {
-  nxmutex_unlock(&g_local_lock);
+  nxrmutex_unlock(&g_local_lock);
 }
 
 /****************************************************************************

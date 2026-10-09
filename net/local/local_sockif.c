@@ -132,6 +132,7 @@ static int local_sockif_alloc(FAR struct socket *psock)
   /* Allocate the local connection structure */
 
   FAR struct local_conn_s *conn;
+
   local_lock();
   conn = local_alloc();
   local_unlock();
@@ -437,7 +438,7 @@ static int local_getpeername(FAR struct socket *psock,
 {
   FAR struct sockaddr_un *unaddr = (FAR struct sockaddr_un *)addr;
   FAR struct local_conn_s *conn = psock->s_conn;
-  FAR struct local_conn_s *peer = conn->lc_peer;
+  FAR struct local_conn_s *peer;
 
   if (*addrlen < sizeof(sa_family_t))
     {
@@ -447,10 +448,17 @@ static int local_getpeername(FAR struct socket *psock,
       return OK;
     }
 
-  /* Verify that the socket has been connected */
+  /* Verify that the socket has been connected, and that its peer has not
+   * gone since, which leaves the state connected.  The peer is freed under
+   * local_lock(), by a close in another task: hold it while the peer is
+   * read.
+   */
 
-  if (conn->lc_state != LOCAL_STATE_CONNECTED)
+  local_lock();
+  peer = conn->lc_peer;
+  if (conn->lc_state != LOCAL_STATE_CONNECTED || peer == NULL)
     {
+      local_unlock();
       return -ENOTCONN;
     }
 
@@ -494,13 +502,14 @@ static int local_getpeername(FAR struct socket *psock,
             }
           else
             {
-               strlcpy(unaddr->sun_path, peer->lc_path, namelen);
+              strlcpy(unaddr->sun_path, peer->lc_path, namelen);
             }
 
           *addrlen = sizeof(sa_family_t) + namelen;
         }
     }
 
+  local_unlock();
   return OK;
 }
 
@@ -552,7 +561,19 @@ static int local_getsockopt(FAR struct socket *psock, int level, int option,
                   return -EINVAL;
                 }
 
+              /* The peer may have gone, leaving the state connected; it is
+               * freed under local_lock().
+               */
+
+              local_lock();
+              if (conn->lc_peer == NULL)
+                {
+                  local_unlock();
+                  return -ENOTCONN;
+                }
+
               memcpy(value, &conn->lc_peer->lc_cred, sizeof(struct ucred));
+              local_unlock();
               return OK;
             }
 #endif
@@ -566,6 +587,7 @@ static int local_getsockopt(FAR struct socket *psock, int level, int option,
                   return -EINVAL;
                 }
 
+              local_lock();
               if (conn->lc_peer)
                 {
                   sendsize = conn->lc_peer->lc_rcvsize;
@@ -574,6 +596,8 @@ static int local_getsockopt(FAR struct socket *psock, int level, int option,
                 {
                   sendsize = CONFIG_DEV_FIFO_SIZE;
                 }
+
+              local_unlock();
 
 #ifdef CONFIG_NET_LOCAL_DGRAM
               if (psock->s_type == SOCK_DGRAM)
@@ -1027,12 +1051,12 @@ static int local_socketpair(FAR struct socket *psocks[2])
       conns[i]->lc_state = LOCAL_STATE_BOUND;
     }
 
-  conns[0]->lc_instance_id = conns[1]->lc_instance_id
 #ifdef CONFIG_NET_LOCAL_STREAM
-                           = local_generate_instance_id();
+  conns[0]->lc_instance_id = local_generate_instance_id();
 #else
-                           = -1;
+  conns[0]->lc_instance_id = -1;
 #endif
+  conns[1]->lc_instance_id = conns[0]->lc_instance_id;
 
   /* Create the FIFOs needed for the connection */
 
@@ -1132,6 +1156,7 @@ static int local_shutdown(FAR struct socket *psock, int how)
       case SOCK_STREAM:
         {
           FAR struct local_conn_s *conn = psock->s_conn;
+
           if (how & SHUT_RD)
             {
               if (conn->lc_infile.f_inode != NULL)
