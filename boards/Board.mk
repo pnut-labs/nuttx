@@ -18,23 +18,56 @@
 #
 ############################################################################
 
-ifneq ($(RCSRCS)$(RCRAWS),)
+# Files laid over the board's ROMFS at CONFIG_ETC_ROMFSMOUNTPT by whoever
+# builds NuttX: ETC_OVERLAY, given on make's command line (it reaches the
+# board's build through MAKEFLAGS), names a directory, by an absolute path,
+# whose tree is the ROMFS's (init.d/x.rc for /etc/init.d/x.rc).  Its *.rc
+# files are preprocessed as the board's are, the others copied as they are,
+# dotfiles left out; a file the board has too is the overlay's, except the
+# passwd file the board may generate.  It needs CONFIG_ETC_ROMFS.  A file
+# removed from the overlay stays in the ROMFS until "make clean".  Make
+# only: the CMake build has hooks of its own (cmake/nuttx_add_romfs.cmake).
+
+ifneq ($(ETC_OVERLAY),)
+ifeq ($(wildcard $(ETC_OVERLAY)/.),)
+$(error ETC_OVERLAY: $(ETC_OVERLAY) is not a directory)
+endif
+ifeq ($(CONFIG_ETC_ROMFS),y)
+ETCMOUNT     := $(patsubst "%",%,$(CONFIG_ETC_ROMFSMOUNTPT))
+OVERLAYFILES := $(patsubst $(ETC_OVERLAY)/%,%,$(shell find $(ETC_OVERLAY) -type f ! -name '.*' 2> /dev/null))
+OVERLAYRCS   := $(filter %.rc,$(OVERLAYFILES))
+OVERLAYRAWS  := $(filter-out %.rc,$(OVERLAYFILES))
+endif
+endif
+
+ifneq ($(RCSRCS)$(RCRAWS)$(OVERLAYFILES),)
 ETCDIR := etctmp
 ETCSRC := $(ETCDIR:%=%.c)
 
 CSRCS += $(ETCSRC)
 
-RCOBJS = $(RCSRCS:%=$(ETCDIR)$(DELIM)%)
+OVERLAYOBJS = $(OVERLAYRCS:%=$(ETCDIR)$(ETCMOUNT)$(DELIM)%)
+RCOBJS = $(filter-out $(OVERLAYOBJS),$(RCSRCS:%=$(ETCDIR)$(DELIM)%))
 
 $(RCOBJS): $(ETCDIR)$(DELIM)%: %
 	$(Q) mkdir -p $(dir $@)
 	$(call PREPROCESS, $<, $@)
 
-$(ETCSRC): $(foreach raw,$(RCRAWS), $(if $(wildcard $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw)), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw), $(if $(wildcard $(BOARD_COMMON_DIR)$(DELIM)$(raw)), $(BOARD_COMMON_DIR)$(DELIM)$(raw), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw)))) $(RCOBJS) $(TOPDIR)$(DELIM).config
+# Preprocessed again when the configuration changes, as they test it
+
+ifneq ($(OVERLAYOBJS),)
+$(OVERLAYOBJS): $(ETCDIR)$(ETCMOUNT)$(DELIM)%: $(ETC_OVERLAY)$(DELIM)% $(TOPDIR)$(DELIM).config
+	$(Q) mkdir -p $(dir $@)
+	$(call PREPROCESS, $<, $@)
+endif
+
+$(ETCSRC): $(foreach raw,$(RCRAWS), $(if $(wildcard $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw)), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw), $(if $(wildcard $(BOARD_COMMON_DIR)$(DELIM)$(raw)), $(BOARD_COMMON_DIR)$(DELIM)$(raw), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw)))) $(RCOBJS) $(OVERLAYOBJS) $(OVERLAYRAWS:%=$(ETC_OVERLAY)$(DELIM)%) $(TOPDIR)$(DELIM).config
 	$(foreach raw, $(RCRAWS), \
 	  $(shell rm -rf $(ETCDIR)$(DELIM)$(raw)) \
 	  $(shell mkdir -p $(dir $(ETCDIR)$(DELIM)$(raw))) \
 	  $(shell cp -rfp $(if $(wildcard $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw)), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw), $(if $(wildcard $(BOARD_COMMON_DIR)$(DELIM)$(raw)), $(BOARD_COMMON_DIR)$(DELIM)$(raw), $(BOARD_DIR)$(DELIM)src$(DELIM)$(raw))) $(ETCDIR)$(DELIM)$(raw)))
+	$(Q) $(foreach raw,$(OVERLAYRAWS),mkdir -p $(dir $(ETCDIR)$(ETCMOUNT)$(DELIM)$(raw)) && \
+	  cp -fp $(ETC_OVERLAY)$(DELIM)$(raw) $(ETCDIR)$(ETCMOUNT)$(DELIM)$(raw) &&) true
 ifeq ($(CONFIG_BOARD_ETC_ROMFS_PASSWD_ENABLE),y)
 	$(Q) set -e; \
 	mkdir -p $(ETCDIR)$(DELIM)$(CONFIG_ETC_ROMFSMOUNTPT); \
