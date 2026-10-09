@@ -132,9 +132,30 @@ static int touch_open(FAR struct file *filep)
       return ret;
     }
 
+  /* The lower half first: a file it refuses is never closed, so its
+   * buffer must not be on the list by then.  Outside the lock, as it may
+   * report at once, and touch_event() takes the lock.
+   */
+
+  if (lower->open)
+    {
+      ret = lower->open(lower);
+      if (ret < 0)
+        {
+          circbuf_uninit(&openpriv->circbuf);
+          kmm_free(openpriv);
+          return ret;
+        }
+    }
+
   ret = nxmutex_lock(&upper->lock);
   if (ret < 0)
     {
+      if (lower->close)
+        {
+          lower->close(lower);
+        }
+
       circbuf_uninit(&openpriv->circbuf);
       kmm_free(openpriv);
       return ret;
@@ -150,12 +171,7 @@ static int touch_open(FAR struct file *filep)
 
   filep->f_priv = openpriv;
   nxmutex_unlock(&upper->lock);
-  if (lower->open)
-    {
-      return lower->open(lower);
-    }
-
-  return ret;
+  return OK;
 }
 
 /****************************************************************************
@@ -290,6 +306,7 @@ static int touch_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       case TSIOC_GRAB:
         {
           int enable = (int)arg;
+
           ret = OK;
           if (enable)
             {
@@ -398,6 +415,7 @@ static void touch_event_notify(FAR struct touch_upperhalf_s *upper,
       if (lower->flags & TOUCH_FLAG_SWAPXY)
         {
           int16_t p = point[n].x;
+
           point[n].x = point[n].y;
           point[n].y = p;
         }
