@@ -85,6 +85,10 @@ if(CONFIG_LCD)
     list(APPEND SRCS ssd1680.c)
   endif()
 
+  if(CONFIG_LCD_UC8253)
+    list(APPEND SRCS uc8253.c)
+  endif()
+
   if(CONFIG_LCD_SSD1351)
     list(APPEND SRCS ssd1351.c)
   endif()

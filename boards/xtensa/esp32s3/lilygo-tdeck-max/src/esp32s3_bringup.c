@@ -35,6 +35,14 @@
 #  include "esp32s3_i2c.h"
 #endif
 
+#ifdef CONFIG_ESPRESSIF_LEDC
+#  include "esp32s3_board_ledc.h"
+#endif
+
+#ifdef CONFIG_VIDEO_FB
+#  include <nuttx/video/fb.h>
+#endif
+
 #include "esp32s3_reset_reasons.h"
 
 #include "lilygo-tdeck-max.h"
@@ -110,7 +118,43 @@ int esp32s3_bringup(void)
           syslog(LOG_ERR, "ERROR: Failed to initialize the XL9555: %d\n",
                  ret);
         }
+#    ifdef CONFIG_ESP32S3_SPI2
+      else
+        {
+          /* The XL9555 has powered the LoRa radio: put it to sleep until
+           * a driver wants it.
+           */
+
+          ret = tdeck_lora_sleep();
+          if (ret < 0)
+            {
+              syslog(LOG_ERR,
+                     "ERROR: Failed to put the SX1262 to sleep: %d\n",
+                     ret);
+            }
+        }
+#    endif
 #  endif
+    }
+#endif
+
+#if defined(CONFIG_VIDEO_FB) && defined(CONFIG_LCD_UC8253)
+  /* The e-paper panel, as /dev/fb0 */
+
+  ret = fb_register(0, 0);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to register /dev/fb0: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_ESPRESSIF_LEDC
+  /* The front light and the keyboard's backlight, as /dev/pwm0 */
+
+  ret = esp32s3_pwm_setup();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to set up the lights: %d\n", ret);
     }
 #endif
 

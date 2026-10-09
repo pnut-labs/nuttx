@@ -1944,6 +1944,75 @@ config SSD1680_FREQUENCY
 
 endif # LCD_SSD1680
 
+config LCD_UC8253
+	bool "UC8253 e-paper controller"
+	default n
+	select SPI_CMDDATA
+	select LCD_PACKEDMSFIRST
+	---help---
+		UltraChip UC8253 e-paper controller, as on the GoodDisplay
+		GDEQ031T10 panel: 240x320, 1 bit, in its own portrait orientation.
+		Pixels are packed most significant bit first; a set bit is white.
+
+		A refresh takes most of a second, so drawing only updates a frame
+		buffer in memory, and the panel is refreshed when the LCD
+		framebuffer driver's redraw is called (FBIO_UPDATE on /dev/fbN):
+		only the area that changed when that is part of the screen, or the
+		whole of it.
+
+if LCD_UC8253
+
+config LCD_UC8253_FREQUENCY
+	int "SPI frequency"
+	default 10000000
+	range 100000 20000000
+
+config LCD_UC8253_PARTIAL
+	bool "Partial refresh"
+	default y
+	---help---
+		Refresh only the part of the panel that changed.  It leaves a
+		little ghosting behind; the UC8253_IOC_FULLREFRESH ioctl makes the
+		next refresh a full one, which clears it.
+
+config LCD_UC8253_FASTUPDATE
+	bool "Fast full refresh"
+	default y
+	---help---
+		Pick the waveform for 90 degrees instead of the measured
+		temperature: a full refresh takes about 1 s instead of about 3 s,
+		at the cost of the cold end of the panel's range.
+
+config LCD_UC8253_ASYNC
+	bool "Refresh from a thread of its own"
+	default y
+	---help---
+		A redraw only wakes a thread that refreshes the panel, after a
+		short wait for the rest of a burst of drawing; the caller does not
+		wait for the panel.  Drawing done while a refresh runs goes out
+		with the next one.
+
+if LCD_UC8253_ASYNC
+
+config LCD_UC8253_ASYNC_DELAY
+	int "Wait for more drawing, in milliseconds"
+	default 20
+	range 0 1000
+
+config LCD_UC8253_ASYNC_PRIORITY
+	int "Refresh thread priority"
+	default 100
+
+config LCD_UC8253_ASYNC_STACKSIZE
+	int "Refresh thread stack size"
+	default 4096
+	---help---
+		The thread logs a panel that stays busy, through the system log:
+		2048 bytes is short for that on Xtensa's windowed ABI.
+
+endif # LCD_UC8253_ASYNC
+endif # LCD_UC8253
+
 
 endmenu # LCD Driver selection
 endif # LCD

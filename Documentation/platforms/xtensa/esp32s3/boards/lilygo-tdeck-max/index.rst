@@ -43,7 +43,9 @@ The port is being written part by part.  Supported so far:
 * NSH on the USB Serial/JTAG console;
 * the 8 MB PSRAM, added to the heap;
 * ``reboot``;
-* the I2C bus, and the XL9555's lines as GPIO devices (``full``).
+* the I2C bus, and the XL9555's lines as GPIO devices (``full``);
+* the SPI bus, the e-paper as ``/dev/fb0``, and both lights as
+  ``/dev/pwm0`` (``full``).
 
 Serial Console
 ==============
@@ -120,7 +122,14 @@ is released and the SX1262's held, and both lights are switched off.
 
 The SX1262's power rail is on the XL9555 (below).  ``nsh`` does not drive
 the expander, so the rail is not switched on, and the radio's high chip
-select feeds it about 15 mA.  ``full`` switches the rail on.
+select feeds it about 15 mA.  ``full`` switches the rail on and puts the
+radio to sleep (``SetSleep``, cold start: about 160 nA) until a driver
+wants it.
+
+The board drives the chip selects itself (``ESP32S3_SPI_UDCS``):
+``SPIDEV_DISPLAY(0)`` is the e-paper, ``SPIDEV_MMCSD(0)`` the microSD card
+and ``SPIDEV_LPWAN(0)`` the SX1262.  The e-paper's data/command line is
+driven through ``SPI_CMDDATA``.
 
 Power rails
 ===========
@@ -160,6 +169,42 @@ Device            XL9555  Line (level at start)
   answers (``i2c dev 0x08 0x77``).  The BQ27220 fuel gauge (``0x55``) does
   not yet: it stretches the clock longer than the I2C driver waits.
 
+Screen
+======
+
+The UC8253 controller is driven by ``drivers/lcd/uc8253.c`` and seen as
+``/dev/fb0`` through NuttX's LCD framebuffer driver: 240 × 320, 1 bit
+(``FB_FMT_Y1``), a set bit white.
+
+* Drawing goes into the framebuffer; the panel is refreshed on
+  ``FBIO_UPDATE``, from a thread of the driver's own, after a short wait
+  for the rest of a burst of drawing.
+* Only the area that changed is refreshed when that is part of the
+  screen, with the partial waveform (about 0.7 s); the whole screen with
+  the full one (about 1.0 s, with ``LCD_UC8253_FASTUPDATE``; measured
+  2026-09-21).
+* A partial refresh leaves a little ghosting behind.  The
+  ``UC8253_IOC_FULLREFRESH`` ioctl on ``/dev/fb0`` makes the next refresh
+  a full one, which clears it; when to ask for it is the caller's choice.
+* Powering the panel down (``FBIOSET_POWER``) puts the controller in deep
+  sleep; the glass keeps the image.
+
+Lights
+======
+
+Both lights are LEDC PWM channels on ``/dev/pwm0`` (timer 0): the first
+is the front light (GPIO 41), the second the keyboard's backlight
+(GPIO 42).  For example, both at half for five seconds::
+
+    nsh> pwm -f 1000 -c 1 -d 50 -c 2 -d 50 -t 5
+
+* The LEDC driver applies the duties in the order they are given, and
+  ignores the channel numbers: ``-c 2 -d 50 -c 1 -d 0`` lights the front
+  light.
+* ``ESPRESSIF_LEDC_TIMER0_CHANNELS`` must stay 2: the further channels
+  default to GPIO 4 to 9, which the board uses for the SX1262, the modem
+  and the e-paper.
+
 Configurations
 ==============
 
@@ -177,13 +222,14 @@ SPI bus and the e-paper.
 full
 ----
 
-Every part the port supports so far, without demonstrations: ``nsh``, plus
-the I2C bus (``/dev/i2c0``, the ``i2c`` command), the XL9555's lines as GPIO
-devices (the ``gpio`` command), and the system log in a 4 KB RAM log
-(``dmesg``).  The RAM log is not cleared by a reset, so the dump of a crash
-is still there after the board restarts; each start is marked with its
-reset reason (1 is a power-up, 3 a software reset, 21 a reset over USB,
-as ``esptool`` does).
+Every part the port supports so far: ``nsh``, plus the I2C bus
+(``/dev/i2c0``, the ``i2c`` command), the XL9555's lines as GPIO devices
+(the ``gpio`` command), the SPI bus, the e-paper (``/dev/fb0``, the ``fb``
+test pattern), both lights (``/dev/pwm0``, the ``pwm`` command), and the
+system log in a 4 KB RAM log (``dmesg``).  The RAM log is not cleared by
+a reset, so the dump of a crash is still there after the board restarts;
+each start is marked with its reset reason (1 is a power-up, 3 a software
+reset, 21 a reset over USB, as ``esptool`` does).
 
 Debugging
 =========
