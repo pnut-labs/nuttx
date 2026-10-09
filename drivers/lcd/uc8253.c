@@ -143,7 +143,7 @@ struct uc8253_dev_s
   bool on;                               /* Powered up */
   bool configured;                       /* Reset and set up */
   bool blank;                            /* Controller RAM undefined */
-  bool known;                            /* glass matches the glass */
+  bool known;                            /* glass is what the panel shows */
   bool dropped;                          /* First flush taken as a clear */
   bool stale;                            /* The last refresh failed */
   bool full;                             /* Next refresh a full one */
