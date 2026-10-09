@@ -145,6 +145,18 @@ int esp32s3_bringup(void)
                      ret);
             }
 #    endif
+
+#    ifdef CONFIG_INPUT_CST3530
+          /* The XL9555 drives the touch controller's reset */
+
+          ret = tdeck_touch_initialize(i2c);
+          if (ret < 0)
+            {
+              syslog(LOG_ERR,
+                     "ERROR: Failed to initialize the touch screen: %d\n",
+                     ret);
+            }
+#    endif
         }
 #  endif
     }

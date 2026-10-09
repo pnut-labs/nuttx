@@ -46,7 +46,9 @@ The port is being written part by part.  Supported so far:
 * the I2C bus, and the XL9555's lines as GPIO devices (``full``);
 * the SPI bus, the e-paper as ``/dev/fb0``, and both lights as
   ``/dev/pwm0`` (``full``);
-* the keyboard as ``/dev/kbd0`` (``full``).
+* the keyboard as ``/dev/kbd0`` (``full``);
+* the touch screen as ``/dev/input0``, and the keys on the glass below it
+  as ``/dev/softkeys`` (``full``).
 
 Serial Console
 ==============
@@ -217,6 +219,37 @@ NuttX's keyboard upper half.
 
     nsh> kbd /dev/kbd0 20
 
+Touch screen
+============
+
+The e-paper is covered by a CST3530 capacitive touch controller (I2C
+``0x1a``, interrupt on GPIO 12, reset on the XL9555's ``touch_rst``),
+driven by ``drivers/input/cst3530.c`` and seen as ``/dev/input0`` through
+NuttX's touchscreen upper half.
+
+* Touches arrive in the panel's pixels, 240 × 320 in portrait, with no
+  swapping or mirroring: (0, 0) is the top left corner.
+* A sample holds the touches reported, up to five, each with its id.  A
+  touch no longer reported is released in a sample of its own, before the
+  touches that remain.  The controller reports every 10 to 20 ms while a
+  finger is on the glass, and the pressure of a finger held still wavers:
+  a touch that has not moved is reported again only once its pressure has
+  changed by ``INPUT_CST3530_PRESSURE_STEP`` (4) since it was last
+  reported.
+* The three keys on the glass below the screen are the device's soft keys:
+  ``/dev/softkeys``, a keyboard device, reports them as the special keys
+  ``KEYCODE_F1``, ``KEYCODE_F2`` and ``KEYCODE_F3``, from the left.
+* The controller sleeps while neither device is open; the first open
+  resets it into normal operation, which takes about 60 ms.
+* The touch screen needs the XL9555 (``IOEXPANDER_PCA9555``), which drives
+  its reset; with ``INPUT_CST3530`` the board selects the GPIO interrupts
+  it needs (``ESPRESSIF_GPIO_IRQ``).
+
+``tc`` prints the samples, and ``kbd`` the soft keys::
+
+    nsh> tc 20
+    nsh> kbd /dev/softkeys 6
+
 Lights
 ======
 
@@ -254,11 +287,13 @@ Every part the port supports so far: ``nsh``, plus the I2C bus
 (``/dev/i2c0``, the ``i2c`` command), the XL9555's lines as GPIO devices
 (the ``gpio`` command), the SPI bus, the e-paper (``/dev/fb0``, the ``fb``
 test pattern), both lights (``/dev/pwm0``, the ``pwm`` command), the
-keyboard (``/dev/kbd0``, the ``kbd`` command), and the system log in a
-4 KB RAM log (``dmesg``).  The RAM log is not cleared by
-a reset, so the dump of a crash is still there after the board restarts;
-each start is marked with its reset reason (1 is a power-up, 3 a software
-reset, 21 a reset over USB, as ``esptool`` does).
+keyboard (``/dev/kbd0``, the ``kbd`` command), the touch screen
+(``/dev/input0``, the ``tc`` command) and the soft keys
+(``/dev/softkeys``), and the system log in a 4 KB RAM log (``dmesg``).
+The RAM log is not cleared by a reset, so the dump of a crash is still
+there after the board restarts; each start is marked with its reset
+reason (1 is a power-up, 3 a software reset, 21 a reset over USB, as
+``esptool`` does).
 
 Debugging
 =========

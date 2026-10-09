@@ -42,6 +42,12 @@ ifeq ($(CONFIG_INPUT_TCA8418),y)
 CSRCS += esp32s3_tca8418.c
 endif
 
+# The touch controller's reset is one of the XL9555's lines
+
+ifeq ($(CONFIG_INPUT_CST3530)$(CONFIG_IOEXPANDER_PCA9555),yy)
+CSRCS += esp32s3_cst3530.c
+endif
+
 DEPPATH += --dep-path board
 VPATH += :board
 CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)board$(DELIM)board
