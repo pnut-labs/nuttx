@@ -73,17 +73,24 @@ int local_release(FAR struct local_conn_s *conn)
     {
       FAR struct local_conn_s *accept;
       FAR dq_entry_t *waiter;
-      FAR dq_entry_t *tmp;
 
       DEBUGASSERT(conn->lc_proto == SOCK_STREAM);
 
       /* Are there still clients waiting for a connection to the server? */
 
-      dq_for_every_safe(&conn->u.server.lc_waiters, waiter, tmp)
+      while ((waiter = dq_remfirst(&conn->u.server.lc_waiters)) != NULL)
         {
           accept = container_of(waiter, struct local_conn_s,
                                 u.accept.lc_waiter);
-          local_subref(accept);
+
+          /* local_subref() would take the lock again, through
+           * local_release().  A connection waiting to be accepted has no
+           * socket yet, so its only reference is this one, and it is
+           * never a listening one: releasing it is freeing it.
+           */
+
+          DEBUGASSERT(accept->lc_crefs == 1);
+          local_free(accept);
         }
 
       conn->u.server.lc_pending = 0;

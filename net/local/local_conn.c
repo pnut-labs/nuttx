@@ -42,9 +42,13 @@
  * Public Data
  ****************************************************************************/
 
-/* Global protection lock for local socket */
+/* Global protection lock for local socket.  Recursive, as net_lock() was
+ * before it: freeing a connection can close a file descriptor passed with
+ * SCM_RIGHTS, which may be the last reference to another local socket,
+ * whose release takes the lock again.
+ */
 
-mutex_t g_local_lock = NXMUTEX_INITIALIZER;
+rmutex_t g_local_lock = NXRMUTEX_INITIALIZER;
 
 /****************************************************************************
  * Private Data
