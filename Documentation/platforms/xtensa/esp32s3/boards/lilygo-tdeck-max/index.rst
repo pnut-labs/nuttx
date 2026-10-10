@@ -48,7 +48,8 @@ The port is being written part by part.  Supported so far:
   ``/dev/pwm0`` (``full``);
 * the keyboard as ``/dev/kbd0`` (``full``);
 * the touch screen as ``/dev/input0``, and the keys on the glass below it
-  as ``/dev/softkeys`` (``full``).
+  as ``/dev/softkeys`` (``full``);
+* the microSD card as ``/dev/mmcsd0``, with FAT (``full``).
 
 Serial Console
 ==============
@@ -266,6 +267,32 @@ is the front light (GPIO 41), the second the keyboard's backlight
   default to GPIO 4 to 9, which the board uses for the SX1262, the modem
   and the e-paper.
 
+microSD card
+============
+
+The microSD slot is on the shared SPI bus (chip select GPIO 48) and is
+always powered.  ``full`` registers the card as ``/dev/mmcsd0`` (NuttX's
+SPI MMC/SD driver, through the common ``board_sdmmc_spi_initialize()``)
+and has FAT, with long and lower-case names; mounting it is left to the
+system::
+
+    nsh> mount -t vfat /dev/mmcsd0 /mnt/sd
+    nsh> umount /mnt/sd
+
+* The slot has no card-detect line, so the board reports a card always
+  present.  A card put into a slot that was empty at the start is
+  identified when ``/dev/mmcsd0`` is next opened; once a card has been
+  identified, a card taken out and put back, or swapped, is not identified
+  again until a restart, even unmounted, and its reads fail.
+* The card runs at 20 MHz (``MMCSD_SPICLOCK``), after 400 kHz while it is
+  identified.  Reading 1 MB with ``dd`` takes about 0.76 s (about 1.3 MB/s);
+  the screen and the card take turns on the bus.
+* ``df -h`` (``/proc/fs/usage``) wraps sizes at 4 GB without
+  ``FS_LARGEFILE``: it shows an 8 GB card as 3286M.  The same limit keeps
+  files, and offsets into ``/dev/mmcsd0``, under 2 GB.
+* FAT only: cards of 64 GB and more, sold with exFAT, need formatting
+  with FAT32 first.
+
 Configurations
 ==============
 
@@ -288,8 +315,9 @@ Every part the port supports so far: ``nsh``, plus the I2C bus
 (the ``gpio`` command), the SPI bus, the e-paper (``/dev/fb0``, the ``fb``
 test pattern), both lights (``/dev/pwm0``, the ``pwm`` command), the
 keyboard (``/dev/kbd0``, the ``kbd`` command), the touch screen
-(``/dev/input0``, the ``tc`` command) and the soft keys
-(``/dev/softkeys``), and the system log in a 4 KB RAM log (``dmesg``).
+(``/dev/input0``, the ``tc`` command), the soft keys
+(``/dev/softkeys``) and the microSD card (``/dev/mmcsd0``, with FAT), and
+the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset
 reason (1 is a power-up, 3 a software reset, 21 a reset over USB, as
