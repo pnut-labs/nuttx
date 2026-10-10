@@ -772,6 +772,31 @@ static void i2c_init_clock(struct esp32s3_i2c_priv_s *priv,
   timeout -= __builtin_clz(5 * half_cycle);
   timeout += 2;
 
+#if CONFIG_ESP32S3_I2C_SCL_TIMEOUT_US > 0
+  /* A slave that stretches the clock may hold SCL low much longer than 10
+   * bus cycles.  The field is the log2 of a count of I2C_SCLK cycles: the
+   * time asked for is rounded up to a power of two, and it only ever
+   * lengthens the timeout.  The cap, 24 (about 0.4 s at 40 MHz), is the
+   * driver's: it keeps the timeout below CONFIG_ESP32S3_I2CTIMEOMS.
+   */
+
+  {
+    uint64_t cycles = (uint64_t)sclk_freq *
+                      CONFIG_ESP32S3_I2C_SCL_TIMEOUT_US / 1000000;
+    uint32_t stretch = 1;
+
+    while (stretch < 24 && ((uint64_t)1 << stretch) < cycles)
+      {
+        stretch++;
+      }
+
+    if (stretch > timeout)
+      {
+        timeout = stretch;
+      }
+  }
+#endif
+
   reg_value  = I2C_TIME_OUT_EN;
   reg_value |= VALUE_TO_FIELD(timeout, I2C_TIME_OUT_VALUE);
   putreg32(reg_value, I2C_TO_REG(priv->id));
