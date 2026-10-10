@@ -556,82 +556,86 @@ static uint32_t mmcsd_sendcmd(FAR struct mmcsd_slot_s *slot,
   result = response;
   switch (cmd->resp)
     {
-    /* The R1B response is two bytes long */
+      /* The R1B response is two bytes long */
 
-    case MMCSD_CMDRESP_R1B:
-      {
-        uint32_t busy = 0;
-        clock_t start;
-        clock_t elapsed;
+      case MMCSD_CMDRESP_R1B:
+        {
+          uint32_t busy = 0;
+          clock_t start;
+          clock_t elapsed;
 
-        start = START_TIME;
-        do
-          {
-            busy = SPI_SEND(spi, 0xff);
-            elapsed = ELAPSED_TIME(start);
-          }
-        while (elapsed < slot->twrite && busy != 0xff);
+          start = START_TIME;
+          do
+            {
+              busy = SPI_SEND(spi, 0xff);
+              elapsed = ELAPSED_TIME(start);
+            }
+          while (elapsed < slot->twrite && busy != 0xff);
 
-        if (busy != 0xff)
-          {
-            ferr("ERROR: Failed: card still busy (%02" PRIx32 ")\n", busy);
-            return (uint32_t)-1;
-          }
+          if (busy != 0xff)
+            {
+              ferr("ERROR: Failed: card still busy (%02" PRIx32 ")\n", busy);
+              return (uint32_t)-1;
+            }
 
-        finfo("CMD%d[%08" PRIx32 "] R1B=%02" PRIx8 "\n",
-              cmd->cmd & 0x3f, arg, response);
-      }
-      break;
+          finfo("CMD%d[%08" PRIx32 "] R1B=%02" PRIx8 "\n",
+                cmd->cmd & 0x3f, arg, response);
+        }
+        break;
 
-    /* The R1 response is a single byte */
+      /* The R1 response is a single byte */
 
-    case MMCSD_CMDRESP_R1:
-      {
-        finfo("CMD%d[%08" PRIx32 "] R1=%02" PRIx8 "\n",
-              cmd->cmd & 0x3f, arg, response);
-      }
-      break;
+      case MMCSD_CMDRESP_R1:
+        {
+          finfo("CMD%d[%08" PRIx32 "] R1=%02" PRIx8 "\n",
+                cmd->cmd & 0x3f, arg, response);
+        }
+        break;
 
-    /* The R2 response is two bytes long */
+      /* The R2 response is two bytes long */
 
-    case MMCSD_CMDRESP_R2:
-      {
-        result  = ((uint32_t)(response & 0xff) << 8);
-        result |= SPI_SEND(spi, 0xff) & 0xff;
+      case MMCSD_CMDRESP_R2:
+        {
+          result  = ((uint32_t)(response & 0xff) << 8);
+          result |= SPI_SEND(spi, 0xff) & 0xff;
 
-        finfo("CMD%d[%08" PRIx32 "] R2=%04" PRIx32 "\n",
-              cmd->cmd & 0x3f, arg, result);
-      }
-      break;
+          finfo("CMD%d[%08" PRIx32 "] R2=%04" PRIx32 "\n",
+                cmd->cmd & 0x3f, arg, result);
+        }
+        break;
 
-    /* The R3 response is 5 bytes long. The first byte is identical to R1. */
+      /* The R3 response is 5 bytes long. The first byte is identical to
+       * R1.
+       */
 
-    case MMCSD_CMDRESP_R3:
-      {
-        slot->ocr  = ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 24);
-        slot->ocr |= ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 16);
-        slot->ocr |= ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 8);
-        slot->ocr |= SPI_SEND(spi, 0xff) & 0xff;
+      case MMCSD_CMDRESP_R3:
+        {
+          slot->ocr  = ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 24);
+          slot->ocr |= ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 16);
+          slot->ocr |= ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 8);
+          slot->ocr |= SPI_SEND(spi, 0xff) & 0xff;
 
-        finfo("CMD%d[%08" PRIx32 "] R1=%02" PRIx8 " OCR=%08" PRIx32 "\n",
-              cmd->cmd & 0x3f, arg, response, slot->ocr);
-      }
-      break;
+          finfo("CMD%d[%08" PRIx32 "] R1=%02" PRIx8 " OCR=%08" PRIx32 "\n",
+                cmd->cmd & 0x3f, arg, response, slot->ocr);
+        }
+        break;
 
-    /* The R7 response is 5 bytes long. The first byte is identical to R1. */
+      /* The R7 response is 5 bytes long. The first byte is identical to
+       * R1.
+       */
 
-    case MMCSD_CMDRESP_R7:
-    default:
-      {
-        slot->r7  = ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 24);
-        slot->r7 |= ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 16);
-        slot->r7 |= ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 8);
-        slot->r7 |= SPI_SEND(spi, 0xff) & 0xff;
+      case MMCSD_CMDRESP_R7:
+      default:
+        {
+          slot->r7  = ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 24);
+          slot->r7 |= ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 16);
+          slot->r7 |= ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 8);
+          slot->r7 |= SPI_SEND(spi, 0xff) & 0xff;
 
-        finfo("CMD%d[%08" PRIx32 "] R1=%02" PRIx8 " R7=%08" PRIx32 "\n",
-              cmd->cmd & 0x3f, arg, response, slot->r7);
-      }
-      break;
+          finfo("CMD%d[%08" PRIx32 "] R1=%02" PRIx8 " R7=%08" PRIx32 "\n",
+                cmd->cmd & 0x3f, arg, response, slot->r7);
+        }
+        break;
     }
 
   return result;
@@ -676,6 +680,7 @@ static uint32_t mmcsd_nsac(FAR struct mmcsd_slot_s *slot, FAR uint8_t *csd,
 
   uint32_t nsac = MMCSD_CSD_NSAC(csd) * ((uint32_t)100 * 1000);
   uint32_t fhkz = (frequency + 500) / 1000;
+
   return (nsac + (fhkz >> 1)) / fhkz;
 }
 
@@ -927,6 +932,8 @@ static int mmcsd_getcardinfo(FAR struct mmcsd_slot_s *slot,
   FAR struct spi_dev_s *spi = slot->spi;
   uint32_t result;
   uint8_t response;
+  clock_t start;
+  int polls;
   int i;
 
   SPI_SEND(spi, 0xff);
@@ -940,12 +947,23 @@ static int mmcsd_getcardinfo(FAR struct mmcsd_slot_s *slot,
       return -EIO;
     }
 
-  /* Try up to 8 times to find the start of block or until an error occurs */
+  /* Wait for the start of block, or an error token, as long as a data
+   * block's read may take (NAC: up to 100 ms), not just 8 bytes: a card
+   * busy inside answered later, and a CSD read failed at random, which
+   * made FAT think the card was gone (fat_checkmount() samples the
+   * geometry, and so the CSD, before its operations)
+   */
 
-  for (i = 0; i < 8; i++)
+  start = START_TIME;
+  for (polls = 0; ; polls++)
     {
+      if (polls > 8 && ELAPSED_TIME(start) >= MMCSD_DELAY_100MS)
+        {
+          break;
+        }
+
       response = SPI_SEND(spi, 0xff);
-      finfo("%d. SPI send returned %02x\n", i, response);
+      finfo("%d. SPI send returned %02x\n", polls, response);
 
       /* If a read operation fails and the card cannot provide the requested
        * data, it will send a data error token instead.  The 4 least
@@ -954,11 +972,17 @@ static int mmcsd_getcardinfo(FAR struct mmcsd_slot_s *slot,
 
       if (response != 0 && (response & MMCSD_SPIDET_UPPER) == 0)
         {
-          ferr("ERROR: %d. Data transfer error: %02x\n", i, response);
+          ferr("ERROR: %d. Data transfer error: %02x\n", polls, response);
           return -EIO;
         }
       else if (response == MMCSD_SPIDT_STARTBLKSNGL)
         {
+          if (polls >= 8)
+            {
+              fwarn("WARNING: CMD%d's data after %d polls\n",
+                    cmd == &g_cmd9 ? 9 : 10, polls + 1);
+            }
+
           for (i = 0; i < 16; ++i)
             {
               *buffer++ = SPI_SEND(spi, 0xff);
@@ -1569,6 +1593,7 @@ static int mmcsd_geometry(FAR struct inode *inode,
   FAR struct spi_dev_s *spi;
   uint8_t csd[16];
   int ret;
+  int i;
 
 #ifdef CONFIG_DEBUG_FEATURES
   if (!geometry)
@@ -1605,14 +1630,25 @@ static int mmcsd_geometry(FAR struct inode *inode,
       return ret;
     }
 
-  SPI_SELECT(spi, SPIDEV_MMCSD(0), true);
-  ret = mmcsd_getcsd(slot, csd);
-  SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
+  /* A failure here tells FAT the medium is gone: try a few times */
+
+  for (i = 0; i < 3; i++)
+    {
+      SPI_SELECT(spi, SPIDEV_MMCSD(0), true);
+      ret = mmcsd_getcsd(slot, csd);
+      SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
+      SPI_SEND(spi, 0xff);
+      if (ret == OK)
+        {
+          break;
+        }
+
+      ferr("ERROR: mmcsd_getcsd returned %d (try %d)\n", ret, i + 1);
+    }
 
   if (ret < 0)
     {
       mmcsd_unlock(slot);
-      ferr("ERROR: mmcsd_getcsd returned %d\n", ret);
       return ret;
     }
 
@@ -1851,7 +1887,7 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
                   result = mmcsd_sendcmd(slot, &g_acmd41, 0);
                   if (result == MMCSD_SPIR1_OK)
                     {
-                       break;
+                      break;
                     }
                 }
             }
@@ -1861,9 +1897,9 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
               result = mmcsd_sendcmd(slot, &g_cmd1, 0);
               if (result == MMCSD_SPIR1_OK)
                 {
-                   finfo("%d. Identified MMC card\n", i);
-                   slot->type = MMCSD_CARDTYPE_MMC;
-                   break;
+                  finfo("%d. Identified MMC card\n", i);
+                  slot->type = MMCSD_CARDTYPE_MMC;
+                  break;
                 }
             }
 
