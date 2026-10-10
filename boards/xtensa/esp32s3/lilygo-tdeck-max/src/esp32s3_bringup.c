@@ -43,6 +43,10 @@
 #  include <nuttx/video/fb.h>
 #endif
 
+#ifdef CONFIG_MMCSD_SPI
+#  include "esp32s3_board_sdmmc.h"
+#endif
+
 #include "esp32s3_reset_reasons.h"
 
 #include "lilygo-tdeck-max.h"
@@ -169,6 +173,22 @@ int esp32s3_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to register /dev/fb0: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_MMCSD_SPI
+  /* The microSD card, on the shared SPI bus, as /dev/mmcsd0.  The slot has
+   * no card-detect line: a card put into a slot that was empty at the
+   * start is identified when the device is next opened, but a card taken
+   * out and put back, or swapped, is not until a restart.  Mounting it is
+   * left to the system.
+   */
+
+  ret = board_sdmmc_spi_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to register the microSD card: %d\n",
+             ret);
     }
 #endif
 
