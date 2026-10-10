@@ -1595,6 +1595,22 @@ config ESP32S3_I2CTIMEOMS
 	default 500
 	depends on ESP32S3_I2C_PERIPH_MASTER_MODE
 
+config ESP32S3_I2C_SCL_TIMEOUT_US
+	int "SCL clock-stretch timeout in microseconds (0: about 10 bus cycles)"
+	default 0
+	range 0 400000
+	depends on ESP32S3_I2C_PERIPH_MASTER_MODE
+	---help---
+		How long a slave may hold SCL low before the I2C controller aborts
+		the transfer (I2C0 and I2C1, not the RTC I2C).  With 0 it is about
+		10 bus cycles (25 us at 400 kHz), too short for a slave that
+		stretches the clock, such as TI's fuel gauges (BQ27220), which is
+		then never seen on the bus.  A few milliseconds is enough for those.
+		The time is rounded up to a power of two of the I2C clock's cycles,
+		never shortens the default, and stops at about 400 ms; keep it
+		below the transfer's own timeout (ESP32S3_I2CTIMEOSEC and
+		ESP32S3_I2CTIMEOMS).
+
 endmenu # I2C Configuration
 
 menu "TWAI driver options"
