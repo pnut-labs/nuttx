@@ -27,17 +27,20 @@
 #include "sx126x.h"
 
 #include <nuttx/arch.h>
+#include <nuttx/clock.h>
 #include <nuttx/config.h>
+#include <nuttx/signal.h>
 
 #include <nuttx/debug.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/wireless/ioctl.h>
 #include <sched.h>
 #include <stdint.h>
-#include <stdio.h>
+#include <string.h>
 #include <sys/endian.h>
 #include <unistd.h>
 #include <nuttx/wireless/lpwan/sx126x.h>
@@ -97,7 +100,9 @@ struct sx126x_dev_s
   bool lora_crc;
   bool lora_fixed_header;
   bool low_datarate_optimization;
-  uint8_t syncword[SX126X_REG_SYNCWORD_LEN];
+  uint8_t syncword[SX126X_REG_SYNCWORD_LEN];  /* GFSK */
+  uint16_t lora_syncword;
+  uint32_t rx_timeout_ms;                 /* read() waits forever if 0 */
 
   /* Interrupt handling */
 
@@ -163,15 +168,19 @@ static void sx126x_spi_lock(FAR struct sx126x_dev_s *dev);
 
 static void sx126x_spi_unlock(FAR struct sx126x_dev_s *dev);
 
-static void sx126x_write_register(FAR struct sx126x_dev_s *dev,
-                                  uint16_t address,
-                                  uint8_t *data,
-                                  size_t data_length);
+static int sx126x_wait_busy(FAR struct sx126x_dev_s *dev);
 
 /* Operational modes functions **********************************************/
 
+static void sx126x_set_sleep(FAR struct sx126x_dev_s *dev);
+
 static void sx126x_set_standby(FAR struct sx126x_dev_s *dev,
                                enum sx126x_standby_mode_e mode);
+
+static void sx126x_calibrate(FAR struct sx126x_dev_s *dev, uint8_t blocks);
+
+static void sx126x_calibrate_image(FAR struct sx126x_dev_s *dev,
+                                   uint32_t frequency_hz);
 
 static void sx126x_set_tx(FAR struct sx126x_dev_s *dev,
                           uint32_t timeout);
@@ -248,12 +257,25 @@ static void sx126x_get_rx_buffer_status(FAR struct sx126x_dev_s *dev,
                                         uint8_t *payload_len,
                                         uint8_t *rx_buff_offset);
 
+static void sx126x_get_packet_status_lora(FAR struct sx126x_dev_s *dev,
+                                          FAR int16_t *rssi_dbm,
+                                          FAR int32_t *snr);
+
 /* Registers and buffer *****************************************************/
 
 static void sx126x_write_register(FAR struct sx126x_dev_s *dev,
                                   uint16_t address,
                                   uint8_t *data,
                                   size_t data_length);
+
+static void sx126x_read_register(FAR struct sx126x_dev_s *dev,
+                                 uint16_t address,
+                                 uint8_t *data,
+                                 size_t data_length);
+
+static void sx126x_update_register(FAR struct sx126x_dev_s *dev,
+                                   uint16_t address, uint8_t mask,
+                                   bool set);
 
 static void sx126x_write_buffer(FAR struct sx126x_dev_s *dev,
                                 uint8_t offset,
@@ -270,6 +292,9 @@ static void sx126x_read_buffer(FAR struct sx126x_dev_s *dev,
 static void sx126x_set_syncword(FAR struct sx126x_dev_s *dev,
                                 uint8_t *syncword,
                                 uint8_t syncword_length);
+
+static void sx126x_set_lora_syncword(FAR struct sx126x_dev_s *dev,
+                                     uint16_t syncword);
 
 /* Driver specific **********************************************************/
 
@@ -303,6 +328,7 @@ static int sx126x_open(FAR struct file *filep)
   /* Get device */
 
   struct sx126x_dev_s *dev;
+
   dev = filep->f_inode->i_private;
   wlinfo("Opening SX126x %d", dev->lower->dev_number);
 
@@ -347,6 +373,7 @@ static int sx126x_close(FAR struct file *filep)
   /* Get device */
 
   struct sx126x_dev_s *dev;
+
   dev = filep->f_inode->i_private;
   wlinfo("Closing SX126x %d", dev->lower->dev_number);
 
@@ -383,116 +410,148 @@ static ssize_t sx126x_read(FAR struct file *filep,
                            FAR char *buf,
                            size_t buflen)
 {
-  int ret = 0;
-  if (buf == NULL || buflen < 1)
+  FAR struct sx126x_dev_s *dev = filep->f_inode->i_private;
+  FAR struct sx126x_read_header_s *header =
+    (FAR struct sx126x_read_header_s *)buf;
+  uint8_t status;
+  uint8_t offset;
+  int ret;
+
+  if (buf == NULL || buflen < sizeof(struct sx126x_read_header_s))
     {
       return -EINVAL;
     }
 
-  /* Get device */
-
-  struct sx126x_dev_s *dev;
-  dev = filep->f_inode->i_private;
-
-  nxmutex_lock(&dev->lock);
-
-  printf("Reading\n");
-
-  /* Get header */
-
-  struct sx126x_read_header_s *header = (struct sx126x_read_header_s *)buf;
-
-  /* Pre-RX setup */
-
-  sx126x_spi_lock(dev);
-  dev->irq_mask = SX126X_IRQ_RXDONE_MASK | SX126X_IRQ_CRCERR_MASK;
-  ret = sx126x_setup_radio(dev);
-  if (ret != 0)
+  ret = nxmutex_lock(&dev->lock);
+  if (ret < 0)
     {
-      goto sx126x_rx_abort;
+      return ret;
     }
 
-  /* RX mode */
-
-  sx126x_set_rx(dev, SX126X_NO_TIMEOUT);
-  sx126x_spi_unlock(dev);
-
-  /* Wait for a packet */
-
-  nxsem_wait(&dev->rx_sem);
-
-  /* Get payload */
-
-  uint8_t status = 0;
-  uint8_t offset = 0;
+  /* Receive continuously until a packet arrives.  The driver keeps the
+   * timeout itself, so that it can be of any length.  With an explicit
+   * header the payload length only sets the largest packet accepted.
+   */
 
   sx126x_spi_lock(dev);
-  sx126x_get_rx_buffer_status(dev, &status,
-                              &header->payload_length,
-                              &offset);
-  sx126x_read_buffer(dev, offset, header->payload,
-                     header->payload_length);
+
+  if (!dev->lora_fixed_header)
+    {
+      dev->payload_len = SX126X_RX_PAYLOAD_SIZE;
+    }
+
+  dev->irq_mask = SX126X_IRQ_RXDONE_MASK | SX126X_IRQ_CRCERR_MASK |
+                  SX126X_IRQ_HEADERERR_MASK;
+  ret = sx126x_setup_radio(dev);
+  if (ret >= 0)
+    {
+      /* Forget a completion left over from an earlier, abandoned wait,
+       * now that the chip's interrupt status is clear
+       */
+
+      while (nxsem_trywait(&dev->rx_sem) == OK);
+
+      sx126x_set_rx(dev, SX126X_SETRX_CONTINUOUS);
+    }
+
   sx126x_spi_unlock(dev);
 
-  /* Get CRC check */
+  if (ret < 0)
+    {
+      goto out;
+    }
 
-  header->crc_error = dev->irqbits & SX126X_IRQ_CRCERR_MASK;
+  if (dev->rx_timeout_ms > 0)
+    {
+      /* In whole seconds and the rest, so that a long timeout does not
+       * overflow the conversion to ticks
+       */
 
-  /* Exit */
+      ret = nxsem_tickwait(&dev->rx_sem,
+                           SEC2TICK(dev->rx_timeout_ms / 1000) +
+                           MSEC2TICK(dev->rx_timeout_ms % 1000));
+    }
+  else
+    {
+      ret = nxsem_wait(&dev->rx_sem);
+    }
 
-  sx126x_rx_abort:
+  sx126x_spi_lock(dev);
 
+  /* Leave receive mode first, so that no new packet overwrites this one */
+
+  sx126x_set_standby(dev, SX126X_STDBY_RC);
+
+  if (ret >= 0)
+    {
+      sx126x_get_rx_buffer_status(dev, &status, &header->payload_length,
+                                  &offset);
+      sx126x_read_buffer(dev, offset, header->payload,
+                         header->payload_length);
+      sx126x_get_packet_status_lora(dev, &header->rssi_db, &header->snr);
+      header->crc_error = (dev->irqbits & SX126X_IRQ_CRCERR_MASK) != 0;
+      ret = sizeof(struct sx126x_read_header_s);
+    }
+
+  sx126x_spi_unlock(dev);
+
+out:
   nxmutex_unlock(&dev->lock);
-
-  return 1;
+  return ret;
 }
 
 static ssize_t sx126x_write(FAR struct file *filep,
                             FAR const char *buf,
                             size_t buflen)
 {
-  int ret = 0;
+  FAR struct sx126x_dev_s *dev = filep->f_inode->i_private;
+  int ret;
 
-  /* Get device */
-
-  struct sx126x_dev_s *dev;
-  dev = filep->f_inode->i_private;
-
-  if (buf == NULL || buflen < 1)
+  if (buf == NULL || buflen < 1 || buflen > SX126X_RX_PAYLOAD_SIZE)
     {
       return -EINVAL;
     }
 
-  nxmutex_lock(&dev->lock);
-  sx126x_spi_lock(dev);
-
-  /* Data */
-
-  dev->payload_len = buflen;
-  sx126x_write_buffer(dev, 0, (uint8_t *)buf, buflen);
-
-  /* Pre-TX setup */
-
-  dev->irq_mask = SX126X_IRQ_TXDONE_MASK;
-  ret = sx126x_setup_radio(dev);
-  if (ret != 0)
+  ret = nxmutex_lock(&dev->lock);
+  if (ret < 0)
     {
-      sx126x_spi_unlock(dev);
-      goto sx126x_tx_abort;
+      return ret;
     }
 
-  /* TX */
+  while (nxsem_trywait(&dev->tx_sem) == OK);
 
-  sx126x_set_tx(dev, 0);
+  sx126x_spi_lock(dev);
+
+  dev->payload_len = buflen;
+  dev->irq_mask = SX126X_IRQ_TXDONE_MASK;
+  ret = sx126x_setup_radio(dev);
+  if (ret >= 0)
+    {
+      sx126x_write_buffer(dev, 0, (FAR const uint8_t *)buf, buflen);
+      sx126x_set_tx(dev, SX126X_SETTX_NO_TIMEOUT);
+    }
 
   sx126x_spi_unlock(dev);
 
-  /* Wait for transmitting operations to be finished */
+  if (ret >= 0)
+    {
+      /* The chip returns to standby by itself once the packet is out */
 
-  wlinfo("TXing");
-  ret = nxsem_wait(&dev->tx_sem);
-
-  sx126x_tx_abort:
+      wlinfo("TXing\n");
+      ret = nxsem_tickwait_uninterruptible(&dev->tx_sem,
+                                           MSEC2TICK(SX126X_TX_TIMEOUT_MS));
+      if (ret < 0)
+        {
+          wlerr("ERROR: No TX done from the SX126x: %d\n", ret);
+          sx126x_spi_lock(dev);
+          sx126x_set_standby(dev, SX126X_STDBY_RC);
+          sx126x_spi_unlock(dev);
+        }
+      else
+        {
+          ret = buflen;
+        }
+    }
 
   nxmutex_unlock(&dev->lock);
   return ret;
@@ -500,26 +559,17 @@ static ssize_t sx126x_write(FAR struct file *filep,
 
 static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
-  int ret = 0;
+  FAR struct sx126x_dev_s *dev = filep->f_inode->i_private;
+  int ret;
 
-  /* Get device */
-
-  struct sx126x_dev_s *dev;
-  dev = filep->f_inode->i_private;
-  wlinfo("IOCTL cmd %d arg %u SX126x dev_number %d",
-    cmd,
-    *(FAR uint32_t *)((uintptr_t)arg),
-    dev->lower->dev_number);
-
-  /* Lock */
+  wlinfo("IOCTL cmd %d SX126x dev_number %d\n", cmd,
+         dev->lower->dev_number);
 
   ret = nxmutex_lock(&dev->lock);
   if (ret < 0)
     {
-      goto exit_err;
+      return ret;
     }
-
-  /* Do thing */
 
   switch (cmd)
     {
@@ -528,7 +578,14 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       case WLIOC_SETRADIOFREQ:
         {
           FAR uint32_t *freq_ptr = (FAR uint32_t *)((uintptr_t)arg);
+
           DEBUGASSERT(freq_ptr != NULL);
+
+          if (dev->lower->check_frequency(*freq_ptr) != 0)
+            {
+              ret = -EINVAL;
+              break;
+            }
 
           dev->frequency_hz = *freq_ptr;
           break;
@@ -539,9 +596,10 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       case WLIOC_GETRADIOFREQ:
         {
           FAR uint32_t *freq_ptr = (FAR uint32_t *)((uintptr_t)arg);
+
           DEBUGASSERT(freq_ptr != NULL);
 
-           *freq_ptr = dev->frequency_hz;
+          *freq_ptr = dev->frequency_hz;
           break;
         }
 
@@ -550,6 +608,7 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       case WLIOC_SETTXPOWER:
         {
           FAR int8_t *ptr = (FAR int8_t *)((uintptr_t)arg);
+
           DEBUGASSERT(ptr != NULL);
 
           dev->power = *ptr;
@@ -561,6 +620,7 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       case WLIOC_GETTXPOWER:
         {
           FAR int8_t *ptr = (FAR int8_t *)((uintptr_t)arg);
+
           DEBUGASSERT(ptr != NULL);
 
           *ptr = dev->power;
@@ -577,6 +637,7 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         {
           FAR struct sx126x_lora_config_s *ptr =
             (FAR struct sx126x_lora_config_s *)((uintptr_t)arg);
+
           DEBUGASSERT(ptr != NULL);
 
           /* Modulation params */
@@ -598,13 +659,36 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
           break;
         }
+
+      /* Receive timeout. arg: uint32_t *milliseconds, 0 = forever */
+
+      case SX126XIOC_RXTIMEOUTSET:
+        {
+          FAR uint32_t *ptr = (FAR uint32_t *)((uintptr_t)arg);
+
+          DEBUGASSERT(ptr != NULL);
+
+          dev->rx_timeout_ms = *ptr;
+          break;
+        }
+
+      /* LoRa sync word. arg: uint16_t *syncword */
+
+      case SX126XIOC_SYNCWORDSET:
+        {
+          FAR uint16_t *ptr = (FAR uint16_t *)((uintptr_t)arg);
+
+          DEBUGASSERT(ptr != NULL);
+
+          dev->lora_syncword = *ptr;
+          break;
+        }
+
+      default:
+        ret = -ENOTTY;
+        break;
     }
 
-  /* Success */
-
-  ret = OK;
-
-exit_err:
   nxmutex_unlock(&dev->lock);
   return ret;
 }
@@ -625,11 +709,71 @@ uint32_t sx126x_convert_freq_in_hz_to_pll_step(uint32_t freq_in_hz)
 
 /* Operational modes functions **********************************************/
 
+static void sx126x_set_sleep(FAR struct sx126x_dev_s *dev)
+{
+  /* Cold start: only the wake-up logic stays on, about 160 nA.  The
+   * configuration is lost, and is set up again before every operation.
+   */
+
+  uint8_t config = SX126X_SETSLEEP_CONF_START_COLD |
+                   SX126X_SETSLEEP_CONF_RTC_DISABLE;
+
+  sx126x_command(dev, SX126X_SETSLEEP, &config, SX126X_SETSLEEP_PARAMS,
+                 NULL);
+}
+
 static void sx126x_set_standby(FAR struct sx126x_dev_s *dev,
                                enum sx126x_standby_mode_e mode)
 {
-  sx126x_command(dev, SX126X_SETSTANDBY, (uint8_t *)&mode,
+  uint8_t param = mode;
+
+  sx126x_command(dev, SX126X_SETSTANDBY, &param,
                  SX126X_SETSTANDBY_PARAMS, NULL);
+}
+
+static void sx126x_calibrate(FAR struct sx126x_dev_s *dev, uint8_t blocks)
+{
+  sx126x_command(dev, SX126X_CALIBRATE, &blocks, SX126X_CALIBRATE_PARAMS,
+                 NULL);
+}
+
+static void sx126x_calibrate_image(FAR struct sx126x_dev_s *dev,
+                                   uint32_t frequency_hz)
+{
+  uint8_t params[SX126X_CALIBRATEIMAGE_PARAMS];
+
+  /* The receiver's image rejection is calibrated for one band at a time,
+   * 902-928 MHz after a reset (datasheet 9.2.1, table 9-2).
+   */
+
+  if (frequency_hz > 900000000)
+    {
+      params[0] = 0xe1;
+      params[1] = 0xe9;
+    }
+  else if (frequency_hz > 850000000)
+    {
+      params[0] = 0xd7;
+      params[1] = 0xdb;
+    }
+  else if (frequency_hz > 770000000)
+    {
+      params[0] = 0xc1;
+      params[1] = 0xc5;
+    }
+  else if (frequency_hz > 460000000)
+    {
+      params[0] = 0x75;
+      params[1] = 0x81;
+    }
+  else
+    {
+      params[0] = 0x6b;
+      params[1] = 0x6f;
+    }
+
+  sx126x_command(dev, SX126X_CALIBRATEIMAGE, params,
+                 SX126X_CALIBRATEIMAGE_PARAMS, NULL);
 }
 
 static void sx126x_set_tx(FAR struct sx126x_dev_s *dev, uint32_t timeout)
@@ -794,6 +938,7 @@ static void sx126x_get_irq_status(FAR struct sx126x_dev_s *dev,
                  returns);
 
   uint16_t bits;
+
   memcpy(&bits, returns +
          SX126X_GETIRQSTATUS_IRQSTATUS_RETURN,
          SX126X_GETIRQSTATUS_IRQSTATUS_RETURNS);
@@ -828,6 +973,7 @@ static void sx126x_set_packet_params_lora(FAR struct sx126x_dev_s *dev,
   memset(params, 0, SX126X_SETPACKETPARMS_PARAMS);
 
   uint16_t preambles = htobe16(pktparams->preambles);
+
   memcpy(params + SX126X_PKTPARAM1_LORA_PREAMBLELEN_PARAM, &preambles,
          SX126X_PKTPARAM1_LORA_PREAMBLELEN_PARAMS);
 
@@ -951,6 +1097,7 @@ static void sx126x_get_rssi_inst(FAR struct sx126x_dev_s *dev,
   /* Calculate dBm from returns */
 
   int32_t rssi = rets[SX126X_GETRSSIINST_RSSI_RETURN];
+
   (*dbm) = -rssi / 2.0;
 }
 
@@ -969,6 +1116,19 @@ static void sx126x_get_rx_buffer_status(FAR struct sx126x_dev_s *dev,
   *status = returns[SX126X_GETRXBUFFERSTATUS_STATUS_RETURN];
   *payload_len = returns[SX126X_GETRXBUFFERSTATUS_PAYLOAD_LEN_RETURN];
   *rx_buff_offset = returns[SX126X_GETRXBUFFERSTATUS_RX_START_PTR_RETURN];
+}
+
+static void sx126x_get_packet_status_lora(FAR struct sx126x_dev_s *dev,
+                                          FAR int16_t *rssi_dbm,
+                                          FAR int32_t *snr)
+{
+  uint8_t returns[SX126X_GETPACKETSTATUS_RETURNS];
+
+  sx126x_command(dev, SX126X_GETPACKETSTATUS, NULL,
+                 SX126X_GETPACKETSTATUS_RETURNS, returns);
+
+  *rssi_dbm = -(int16_t)returns[SX126X_GETPACKETSTATUS_LORA_RSSI_RETURN] / 2;
+  *snr      = (int8_t)returns[SX126X_GETPACKETSTATUS_LORA_SNR_RETURN];
 }
 
 /* Lower hardware control ***************************************************/
@@ -1005,10 +1165,52 @@ static void sx126x_spi_unlock(FAR struct sx126x_dev_s *dev)
   SPI_LOCK(dev->spi, false);
 }
 
+static int sx126x_wait_busy(FAR struct sx126x_dev_s *dev)
+{
+  clock_t start;
+  int i;
+
+  if (dev->lower->busy == NULL)
+    {
+      return OK;
+    }
+
+  /* Most commands keep the chip busy for microseconds; a reset, a
+   * calibration or the wake-up from sleep for a few milliseconds.  Spin
+   * through that: sleeping costs at least a whole system tick.
+   */
+
+  for (i = 0; i < 1000; i++)
+    {
+      if (!dev->lower->busy())
+        {
+          return OK;
+        }
+
+      up_udelay(10);
+    }
+
+  start = clock_systime_ticks();
+  while (dev->lower->busy())
+    {
+      if (clock_systime_ticks() - start >
+          MSEC2TICK(SX126X_BUSY_TIMEOUT_MS))
+        {
+          wlerr("ERROR: SX126x %d stays busy\n", dev->lower->dev_number);
+          return -ETIMEDOUT;
+        }
+
+      nxsched_usleep(1000);
+    }
+
+  return OK;
+}
+
 static void sx126x_command(FAR struct sx126x_dev_s *dev, uint8_t cmd,
                            const FAR uint8_t *params, size_t paramslen,
                            FAR uint8_t *returns)
 {
+  sx126x_wait_busy(dev);
   sx126x_select(dev);
 
   /* First send the command. This does not return anything.
@@ -1022,6 +1224,7 @@ static void sx126x_command(FAR struct sx126x_dev_s *dev, uint8_t cmd,
   for (size_t i = 0; i < paramslen; i++)
     {
       uint8_t param = SX126X_NOP;
+
       if (params != NULL)
         {
           param = params[i];
@@ -1045,6 +1248,7 @@ static void sx126x_write_register(FAR struct sx126x_dev_s *dev,
                                   uint8_t *data,
                                   size_t data_length)
 {
+  sx126x_wait_busy(dev);
   sx126x_select(dev);
 
   /* Send the opcode and address */
@@ -1068,15 +1272,17 @@ static void sx126x_read_register(FAR struct sx126x_dev_s *dev,
                                  uint8_t *data,
                                  size_t data_length)
 {
+  sx126x_wait_busy(dev);
   sx126x_select(dev);
 
-  /* Send the opcode and address */
+  /* Send the opcode and address, then a NOP while the status comes back */
 
-  SPI_SEND(dev->spi, SX126X_WRITEREGISTER);
+  SPI_SEND(dev->spi, SX126X_READREGISTER);
   SPI_SEND(dev->spi, (uint8_t)(address >> 8));
   SPI_SEND(dev->spi, (uint8_t)address);
+  SPI_SEND(dev->spi, SX126X_NOP);
 
-  /* Send data */
+  /* Read data */
 
   for (size_t i = 0; i < data_length; i++)
     {
@@ -1086,11 +1292,23 @@ static void sx126x_read_register(FAR struct sx126x_dev_s *dev,
   sx126x_deselect(dev);
 }
 
+static void sx126x_update_register(FAR struct sx126x_dev_s *dev,
+                                   uint16_t address, uint8_t mask,
+                                   bool set)
+{
+  uint8_t value;
+
+  sx126x_read_register(dev, address, &value, 1);
+  value = set ? (value | mask) : (value & ~mask);
+  sx126x_write_register(dev, address, &value, 1);
+}
+
 static void sx126x_write_buffer(FAR struct sx126x_dev_s *dev,
                                 uint8_t offset,
                                 FAR const uint8_t *payload,
                                 uint8_t len)
 {
+  sx126x_wait_busy(dev);
   sx126x_select(dev);
 
   /* Command */
@@ -1116,6 +1334,7 @@ static void sx126x_read_buffer(FAR struct sx126x_dev_s *dev,
                                FAR uint8_t *payload,
                                uint8_t len)
 {
+  sx126x_wait_busy(dev);
   sx126x_select(dev);
 
   /* Command */
@@ -1155,17 +1374,39 @@ static void sx126x_set_syncword(FAR struct sx126x_dev_s *dev,
   sx126x_write_register(dev, SX126X_REG_SYNCWORD, syncword, syncword_length);
 }
 
+static void sx126x_set_lora_syncword(FAR struct sx126x_dev_s *dev,
+                                     uint16_t syncword)
+{
+  uint8_t data[2];
+
+  data[0] = syncword >> 8;
+  data[1] = syncword & 0xff;
+  sx126x_write_register(dev, SX126X_REG_LORA_SYNCWORD, data, sizeof(data));
+}
+
 /* Driver specific **********************************************************/
 
 static int sx126x_init(FAR struct sx126x_dev_s *dev)
 {
+  int ret;
+
   sx126x_reset(dev);
+
+  sx126x_spi_lock(dev);
+  ret = sx126x_wait_busy(dev);
+  sx126x_spi_unlock(dev);
+
   sx126x_set_defaults(dev);
-  return 0;
+  return ret;
 }
 
 static int sx126x_deinit(FAR struct sx126x_dev_s *dev)
 {
+  /* Nothing to do until the next open: sleep */
+
+  sx126x_spi_lock(dev);
+  sx126x_set_sleep(dev);
+  sx126x_spi_unlock(dev);
   return 0;
 }
 
@@ -1192,20 +1433,53 @@ static void sx126x_set_defaults(FAR struct sx126x_dev_s *dev)
   dev->low_datarate_optimization    = SX126X_DEFAULT_LORA_LDO;
 
   uint8_t newsyncword[] = SX126X_DEFAULT_SYNCWORD;
+
   memcpy(dev->syncword, newsyncword, sizeof(dev->syncword));
+  dev->lora_syncword                = SX126X_DEFAULT_LORA_SYNCWORD;
+  dev->rx_timeout_ms                = 0;
 
   /* GFSK defaults */
 }
 
 static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
 {
-  /* Clear IRQ status */
+  enum sx126x_device_e model;
+  uint8_t hp;
+  uint8_t dc;
 
-  sx126x_clear_irq_status(dev, 0xffff);
+  if (dev->lower->check_frequency(dev->frequency_hz) != 0)
+    {
+      wlerr("Board does not support %" PRIu32 "Hz\n", dev->frequency_hz);
+      return -EINVAL;
+    }
+
+  /* All of this is set in STDBY_RC.  The chip may have been reset or
+   * asleep, so everything is set every time.
+   */
+
+  sx126x_set_standby(dev, SX126X_STDBY_RC);
+
+  /* A TCXO has to be enabled before anything runs from the crystal, and
+   * the calibration at power-up ran without it: calibrate again, then
+   * calibrate the image rejection for the band in use.
+   */
+
+  if (dev->lower->dio3_delay > 0)
+    {
+      sx126x_set_dio3_as_tcxo(dev, dev->lower->dio3_voltage,
+                              dev->lower->dio3_delay);
+    }
+
+  sx126x_calibrate(dev, SX126X_CALIBRATE_ALL);
+  sx126x_calibrate_image(dev, dev->frequency_hz);
 
   /* Set regulator */
 
   sx126x_set_regulator_mode(dev, dev->lower->regulator_mode);
+
+  /* DIO 2 */
+
+  sx126x_set_dio2_as_rf_switch(dev, dev->lower->use_dio2_as_rf_sw);
 
   /* Set packet type */
 
@@ -1213,23 +1487,16 @@ static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
 
   /* Set RF frequency */
 
-  int illegal_freq = dev->lower->check_frequency(dev->frequency_hz);
-
-  if (illegal_freq)
-    {
-      wlerr("Board does not support %dHz", dev->frequency_hz);
-      return -1;
-    }
-
   sx126x_set_rf_frequency(dev, dev->frequency_hz);
 
-  /* Set PA settings from lower */
+  /* Set PA settings from lower, and let the PA survive a mismatched
+   * antenna (datasheet 15.2)
+   */
 
-  uint8_t hp;
-  uint8_t dc;
-  enum sx126x_device_e model;
   dev->lower->get_pa_values(&model, &hp, &dc);
   sx126x_set_pa_config(dev, model, hp, dc);
+  sx126x_update_register(dev, SX126X_REG_TX_CLAMP, SX126X_TX_CLAMP_CONFIG,
+                         true);
 
   /* Set TX params */
 
@@ -1257,6 +1524,12 @@ static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
 
           sx126x_set_modulation_params_lora(dev, &modparams);
 
+          /* Modulation quality at 500 kHz (datasheet 15.1) */
+
+          sx126x_update_register(dev, SX126X_REG_TX_MODULATION,
+                                 SX126X_TX_MODULATION_BW500,
+                                 dev->lora_bw != SX126X_LORA_BW_500);
+
           /* Packet params */
 
           struct sx126x_packetparams_lora_s pktparams = {
@@ -1268,16 +1541,24 @@ static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
           };
 
           sx126x_set_packet_params_lora(dev, &pktparams);
+
+          /* Inverted IQ needs the IQ polarity bit fixed (datasheet 15.4) */
+
+          sx126x_update_register(dev, SX126X_REG_IQ_POLARITY,
+                                 SX126X_IQ_POLARITY_STANDARD,
+                                 !dev->invert_iq);
+
+          sx126x_set_lora_syncword(dev, dev->lora_syncword);
           break;
         }
 
       default:
-      break;
+
+        /* Sync word */
+
+        sx126x_set_syncword(dev, dev->syncword, sizeof(dev->syncword));
+        break;
     }
-
-  /* Sync word */
-
-  sx126x_set_syncword(dev, dev->syncword, sizeof(dev->syncword));
 
   /* IRQ MASK */
 
@@ -1286,14 +1567,7 @@ static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
     dev->lower->masks.dio2_mask,
     dev->lower->masks.dio3_mask);
 
-  /* DIO 2 */
-
-  sx126x_set_dio2_as_rf_switch(dev, dev->lower->use_dio2_as_rf_sw);
-
-  /* DIO 3 */
-
-  sx126x_set_dio3_as_tcxo(dev, dev->lower->dio3_voltage,
-                          dev->lower->dio3_delay);
+  sx126x_clear_irq_status(dev, 0xffff);
   return 0;
 }
 
@@ -1305,9 +1579,17 @@ static int sx126x_irq0handler(int irq, FAR void *context, FAR void *arg)
 
   DEBUGASSERT(dev != NULL);
 
-  DEBUGASSERT(work_available(&dev->irq0_work));
+  /* A level triggered line stays active until the worker has cleared the
+   * chip's IRQ status
+   */
 
-  return work_queue(HPWORK, &dev->irq0_work, sx126x_isr0_process, arg, 0);
+  if (dev->lower->irq0enable != NULL)
+    {
+      dev->lower->irq0enable(false);
+    }
+
+  work_queue(HPWORK, &dev->irq0_work, sx126x_isr0_process, arg, 0);
+  return OK;
 }
 
 static inline int sx126x_attachirq0(FAR struct sx126x_dev_s *dev, xcpt_t isr,
@@ -1323,49 +1605,57 @@ static void sx126x_isr0_process(FAR void *arg)
   DEBUGASSERT(arg);
 
   FAR struct sx126x_dev_s *dev = (FAR struct sx126x_dev_s *)arg;
+  uint16_t irqbits;
 
-  wlinfo("SX126x ISR0 process triggered");
+  wlinfo("SX126x ISR0 process triggered\n");
 
   /* Get and clear IRQ bits */
 
   sx126x_spi_lock(dev);
-  sx126x_get_irq_status(dev, &dev->irqbits);
+  sx126x_get_irq_status(dev, &irqbits);
+  sx126x_clear_irq_status(dev, irqbits);
   sx126x_spi_unlock(dev);
 
-  wlinfo("IRQ status 0x%X", dev->irqbits);
+  if (dev->lower->irq0enable != NULL)
+    {
+      dev->lower->irq0enable(true);
+    }
+
+  wlinfo("IRQ status 0x%X\n", irqbits);
 
   /* On TX done */
 
-  if (dev->irqbits & SX126X_IRQ_TXDONE_MASK)
+  if (irqbits & SX126X_IRQ_TXDONE_MASK)
     {
-      wlinfo("TX done");
+      wlinfo("TX done\n");
 
       /* Release writing threads */
 
       nxsem_post(&dev->tx_sem);
     }
 
-  /* On RX done */
+  /* On RX done.  A header error alone is not a packet: receive on. */
 
-  if (dev->irqbits & SX126X_IRQ_RXDONE_MASK)
+  if (irqbits & SX126X_IRQ_RXDONE_MASK)
     {
-      wlinfo("RX done");
+      wlinfo("RX done\n");
 
+      dev->irqbits = irqbits;
       nxsem_post(&dev->rx_sem);
     }
 
   /* On CAD done */
 
-  if (dev->irqbits & SX126X_IRQ_CADDONE_MASK)
+  if (irqbits & SX126X_IRQ_CADDONE_MASK)
     {
-      wlinfo("CAD done");
+      wlinfo("CAD done\n");
     }
 
   /* On CAD detect */
 
-  if (dev->irqbits & SX126X_IRQ_CADDETECTED_MASK)
+  if (irqbits & SX126X_IRQ_CADDETECTED_MASK)
     {
-      wlinfo("CAD detect");
+      wlinfo("CAD detect\n");
     }
 }
 
@@ -1390,6 +1680,7 @@ void sx126x_register(FAR struct spi_dev_s *spi,
     }
 
   struct sx126x_dev_s *dev;
+
   dev = &g_sx126x_devices[lower->dev_number];
   dev->lower   = lower;
   dev->spi     = spi;
@@ -1399,6 +1690,7 @@ void sx126x_register(FAR struct spi_dev_s *spi,
   nxmutex_init(&dev->lock);
   nxsem_init(&dev->rx_sem, 0, 0);
   nxsem_init(&dev->tx_sem, 0, 0);
+  sx126x_set_defaults(dev);
 
   sx126x_attachirq0(dev, sx126x_irq0handler, dev);
 

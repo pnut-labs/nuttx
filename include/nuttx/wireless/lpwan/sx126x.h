@@ -55,6 +55,21 @@
 
 #define SX126XIOC_LORACONFIGSET             _WLCIOC(SX126X_FIRST+1)
 
+/* Sets how long read() waits for a packet before it fails with
+ * -ETIMEDOUT.  arg: uint32_t *milliseconds, 0 to wait forever (the
+ * default).
+ */
+
+#define SX126XIOC_RXTIMEOUTSET              _WLCIOC(SX126X_FIRST+2)
+
+/* Sets the LoRa sync word, as the two bytes of the chip's register, most
+ * significant first.  arg: uint16_t *syncword.  0x1424 is the default
+ * (private networks), 0x3444 is LoRaWAN's; a one byte sync word 0xXY of
+ * other LoRa chips corresponds to 0xX4Y4.
+ */
+
+#define SX126XIOC_SYNCWORDSET               _WLCIOC(SX126X_FIRST+3)
+
 /* IRQ Register bits ********************************************************/
 
 #define SX126X_IRQ_TXDONE_MASK              (1<<0)
@@ -341,7 +356,18 @@ struct sx126x_lower_s
    */
 
   unsigned int dev_number;
+
+  /* Pulse NRESET and return once the chip is out of reset */
+
   CODE void (*reset)(void);
+
+  /* Read the BUSY line.  The chip only takes a command while it is low;
+   * it stays high for up to a few milliseconds after a reset, a wake-up
+   * from sleep or a calibration.  Optional, but without it the driver
+   * cannot wait for the chip.
+   */
+
+  CODE bool (*busy)(void);
 
   /* This controls which DIO reacts to interrupts
    * Depended on the pinout of the board / module.
@@ -351,6 +377,11 @@ struct sx126x_lower_s
    */
 
   struct sx126x_irq_masks masks;
+
+  /* A TCXO powered from DIO3: its voltage, and its start-up time in steps
+   * of 15.625 us.  A delay of 0 means there is no TCXO.
+   */
+
   enum sx126x_tcxo_voltage_e dio3_voltage;
   uint32_t dio3_delay;
   uint8_t use_dio2_as_rf_sw;
@@ -360,6 +391,14 @@ struct sx126x_lower_s
    */
 
   CODE int (*irq0attach)(xcpt_t handler, FAR void *arg);
+
+  /* Mask or unmask that interrupt.  Optional; needed if it is level
+   * triggered (DIO1 stays high until the driver clears the chip's IRQ
+   * status): the handler masks it, and the driver unmasks it once it has
+   * cleared the status.
+   */
+
+  CODE void (*irq0enable)(bool enable);
 
   /* The regulator mode is board / module depended */
 
@@ -398,13 +437,17 @@ struct sx126x_lower_s
 
 /* Upper ********************************************************************/
 
+/* What read() returns, for one received packet.  The buffer passed to
+ * read() must hold the whole structure.
+ */
+
 struct sx126x_read_header_s
 {
   uint8_t payload_length;
-  int32_t snr;
-  int16_t rssi_db;
+  int32_t snr;                             /* Signal to noise ratio, 0.25 dB */
+  int16_t rssi_db;                         /* Packet RSSI, dBm */
   uint8_t payload[SX126X_RX_PAYLOAD_SIZE];
-  uint8_t crc_error;
+  uint8_t crc_error;                       /* Non-zero if the CRC failed */
 };
 
 /****************************************************************************

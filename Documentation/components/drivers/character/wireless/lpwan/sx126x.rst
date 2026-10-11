@@ -30,18 +30,26 @@ See ``nuttx/wireless/lpwan/sx126x.h`` : ``SX126XIOC_x`` for the commands.
 
 * LoRa modulation and LoRa packets are configured using ``SX126XIOC_LORACONFIGSET`` which takes a pointer to a ``sx126x_lora_config_s`` struct. This struct contains two separate structures for modulation and packet config. It is recommended to follow the SX126x datasheet at https://www.semtech.com/products/wireless-rf/lora-connect/sx1262 that gives more details about each parameter.
 
+* ``SX126XIOC_RXTIMEOUTSET`` takes a pointer to a ``uint32_t`` in milliseconds: how long ``read`` waits for a packet before it fails with ``-ETIMEDOUT``. 0, the default, waits forever.
+
+* ``SX126XIOC_SYNCWORDSET`` takes a pointer to a ``uint16_t``: the LoRa sync word as the two bytes of the chip's register, most significant first. 0x1424 is the default (private networks), 0x3444 LoRaWAN's; the one byte sync word 0xXY of other LoRa chips corresponds to 0xX4Y4.
+
 Reading / Writing
 -----------------
 Reading and writing is done with the ``read`` and ``write`` functions.
 
-* ``write`` directly transmits the given bytes using the IOCTL configured parameters. **Does not support polling or timeout yet.**
+* ``write`` transmits the given bytes, 1 to 255 of them, using the IOCTL configured parameters, and returns once they are sent. It fails with ``-ETIMEDOUT`` if the chip does not finish within 20 seconds. **Does not support polling yet.**
 
-* ``read`` takes a pointer to ``sx126x_read_header_s``, which contains information about the received packet. **RSSI and SNR aren't implemented yet**. *Note that packets are always received, even when the CRC (checked using ``.crc_error``) failed.*
+* ``read`` takes a pointer to ``sx126x_read_header_s``, and a buffer at least that large, and waits for a packet: the header holds its payload, the packet's RSSI in dBm and its SNR in 0.25 dB. *Note that packets are always received, even when the CRC (checked using ``.crc_error``) failed.*
 
 Board implementation
 ====================
 The driver can be registered in board logic using ``sx126x_register``, which takes an SPI bus, lower driver and the path.
 More information about ``struct sx126x_lower_s`` parameters can be found in detail under ``nuttx/wireless/lpwan/sx126x.h`` : ``struct sx126x_lower_s``.
+
+* ``busy`` reads the chip's BUSY line. The driver waits for it to go low before every command; without it, the driver cannot wait for the chip.
+* ``irq0enable`` masks and unmasks the interrupt. It is needed when the interrupt is level triggered: the handler masks it, and the driver unmasks it once it has cleared the chip's interrupt status in its worker.
+* ``dio3_voltage`` and ``dio3_delay`` power a TCXO from DIO3; a ``dio3_delay`` of 0 means there is no TCXO. ``use_dio2_as_rf_sw`` has DIO2 drive the RF switch.
 
 This driver supports multiple instances using ``dev_number`` found in ``sx126x_lower_s``. This is done so multiple channels of LoRa can work at the same time.
 

@@ -68,6 +68,17 @@
 #define SX126X_DEFAULT_POWER              0x0e
 #define SX126X_DEFAULT_PACKET_TYPE        SX126X_PACKETTYPE_LORA
 #define SX126X_DEFAULT_SYNCWORD           {0x32, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+#define SX126X_DEFAULT_LORA_SYNCWORD      0x1424 /* Private network */
+
+/* Longest a transmission may take, on air at SF12 and 125 kHz with a full
+ * 255 byte payload, with a margin
+ */
+
+#define SX126X_TX_TIMEOUT_MS              20000
+
+/* Longest the chip may stay busy: waking from sleep, calibrating */
+
+#define SX126X_BUSY_TIMEOUT_MS            100
 
 /* Hardware defaults */
 
@@ -89,6 +100,17 @@
 #define SX126X_REG_CRC_POLY_LSB   0x06BF /* Default 0x21 */
 #define SX126X_REG_WHITENING_MSB  0x06B8 /* Default 0x01 */
 #define SX126X_REG_WHITENING_LSB  0x06B9 /* Default 0x00 */
+
+#define SX126X_REG_LORA_SYNCWORD  0x0740 /* 2 bytes, MSB first. Default 0x1424 */
+#define SX126X_REG_IQ_POLARITY    0x0736 /* Bit 2 set with standard IQ (15.4) */
+#define SX126X_REG_TX_MODULATION  0x0889 /* Bit 2 clear for LoRa 500 kHz (15.1) */
+#define SX126X_REG_TX_CLAMP       0x08D8 /* Bits 4:1 set: PA clamping (15.2) */
+
+/* Datasheet chapter 15, "Known Limitations" */
+
+#define SX126X_IQ_POLARITY_STANDARD  (1<<2)
+#define SX126X_TX_MODULATION_BW500   (1<<2)
+#define SX126X_TX_CLAMP_CONFIG       (0x0f<<1)
 
 /* Enum and constant definitions ********************************************/
 
@@ -159,17 +181,17 @@
 /* SetTX */
 
 #define SX126X_SETTX                    0x83        /* Opcode */
-#define SX126X_SETTX_PARAMS             2
+#define SX126X_SETTX_PARAMS             3
 #define SX126X_SETTX_TIMEOUT_PARAM      0
-#define SX126X_SETTX_TIMEOUT_PARAMS     2
+#define SX126X_SETTX_TIMEOUT_PARAMS     3
 #define SX126X_SETTX_NO_TIMEOUT         0x000000    /* Constant */
 
 /* SetRX */
 
 #define SX126X_SETRX                    0x82        /* Opcode */
-#define SX126X_SETRX_PARAMS             2
+#define SX126X_SETRX_PARAMS             3
 #define SX126X_SETRX_TIMEOUT_PARAM      0
-#define SX126X_SETRX_TIMEOUT_PARAMS     2
+#define SX126X_SETRX_TIMEOUT_PARAMS     3
 #define SX126X_SETRX_NO_TIMEOUT         0x000000    /* Constant */
 #define SX126X_SETRX_CONTINUOUS         0xFFFFFF    /* Constant */
 
@@ -216,12 +238,15 @@
 #define SX126X_CALIBRATE_ADC_BULK_N_EN      (1<<4)
 #define SX126X_CALIBRATE_ADC_BULK_P_EN      (1<<5)
 #define SX126X_CALIBRATE_IMAGE_EN           (1<<6)
+#define SX126X_CALIBRATE_PARAMS             1
+#define SX126X_CALIBRATE_ALL                0x7f
 
 /* CalibrateImage */
 
 #define SX126X_CALIBRATEIMAGE               0x98
 #define SX126X_CALIBRATEIMAGE_FREQ1_PARAM   0
 #define SX126X_CALIBRATEIMAGE_FREQ2_PARAM   1
+#define SX126X_CALIBRATEIMAGE_PARAMS        2
 
 /* SetPAConfig */
 
@@ -413,6 +438,13 @@
 #define SX126X_GETRSSIINST_RETURNS       2
 #define SX126X_GETRSSIINST_STAT_RETURN   0
 #define SX126X_GETRSSIINST_RSSI_RETURN   1
+
+/* GetPacketStatus */
+
+#define SX126X_GETPACKETSTATUS                        0x14
+#define SX126X_GETPACKETSTATUS_RETURNS                4
+#define SX126X_GETPACKETSTATUS_LORA_RSSI_RETURN       1 /* -RssiPkt/2 dBm */
+#define SX126X_GETPACKETSTATUS_LORA_SNR_RETURN        2 /* SnrPkt/4 dB, signed */
 
 /* GetRxBufferStatus */
 
