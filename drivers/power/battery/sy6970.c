@@ -88,6 +88,7 @@
 
 #define SY6970_REG09                 0x09
 #define SY6970_BATFET_DIS            (1 << 5)
+#define SY6970_BATFET_DLY            (1 << 3)  /* Off after about 10 s */
 
 /* REG0B: status */
 
@@ -468,9 +469,12 @@ static int sy6970_operate(FAR struct battery_charger_dev_s *dev,
 
   switch (msg->operate_type)
     {
+      /* At once: a board that stays on, on input power, can tell */
+
       case BATIO_OPRTN_SHIPMODE:
       case BATIO_OPRTN_SYSOFF:
-        return sy6970_modifyreg(priv, SY6970_REG09, 0, SY6970_BATFET_DIS);
+        return sy6970_modifyreg(priv, SY6970_REG09, SY6970_BATFET_DLY,
+                                SY6970_BATFET_DIS);
 
       case BATIO_OPRTN_SYSON:
         return sy6970_modifyreg(priv, SY6970_REG09, SY6970_BATFET_DIS, 0);
