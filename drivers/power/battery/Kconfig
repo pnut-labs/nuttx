@@ -130,6 +130,18 @@ config BQ27426
 		It can be interrogated by a system processor to provide cell information,
 		such as state-of-charge (SOC).
 
+config BQ27220
+	bool "BQ27220 Battery fuel gauge support"
+	default n
+	select I2C
+	depends on BATTERY_GAUGE
+	---help---
+		The TI BQ27220 is a single cell fuel gauge using the CEDV
+		(compensated end of discharge voltage) algorithm.  The driver
+		reports voltage, current, temperature and state of charge, and can
+		set the design capacity of the battery, which the gauge keeps in
+		RAM for as long as the cell powers it.
+
 config BATTERY_MONITOR
 	bool "Battery Monitor/Management support"
 	default n

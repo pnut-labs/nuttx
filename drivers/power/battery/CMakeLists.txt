@@ -74,6 +74,12 @@ if(CONFIG_BATTERY_GAUGE)
     list(APPEND SRCS bq27426.c)
   endif()
 
+  # Add the bq27220 I2C-based battery gauge driver
+
+  if(CONFIG_BQ27220)
+    list(APPEND SRCS bq27220.c)
+  endif()
+
 endif()
 
 # Add battery monitor drivers
