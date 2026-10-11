@@ -103,4 +103,14 @@
 #define BOARD_I2S_DOUT            40    /* To the codec's DSDIN */
 #define BOARD_I2S_DIN             17    /* From the codec's ASDOUT */
 
+/* The battery: one Li-Po cell, which the fuel gauge (BQ27220) is told,
+ * and what the charger (SY6970) charges it with: the vendor's firmware's
+ * values.  4288 mV is above the usual 4.20 V; the cell's rating is not
+ * published.
+ */
+
+#define BOARD_BATTERY_MAH         1400
+#define BOARD_CHARGE_MV           4288
+#define BOARD_CHARGE_MA           1024
+
 #endif /* __BOARDS_XTENSA_ESP32S3_LILYGO_TDECK_MAX_INCLUDE_BOARD_H */

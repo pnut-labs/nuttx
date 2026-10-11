@@ -629,6 +629,7 @@ config ARCH_BOARD_LILYGO_TDECK_MAX
 	bool "LilyGo T-Deck Max (ESP32-S3)"
 	depends on ARCH_CHIP_ESP32S3WROOM1N16R8
 	select ESPRESSIF_GPIO_IRQ if INPUT_TCA8418 || INPUT_CST3530
+	select ARCH_HAVE_POWEROFF if SY6970
 	---help---
 		The LilyGo T-Deck Max is a handheld built around an ESP32-S3 with
 		16 MB flash and 8 MB PSRAM: a 3.1" e-paper screen, a keyboard,
