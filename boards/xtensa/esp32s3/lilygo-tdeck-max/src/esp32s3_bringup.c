@@ -115,6 +115,12 @@ int esp32s3_bringup(void)
         }
 #  endif
 
+#  if defined(CONFIG_BQ27220) || defined(CONFIG_SY6970)
+      /* The fuel gauge and the charger */
+
+      tdeck_battery_initialize(i2c);
+#  endif
+
 #  ifdef CONFIG_IOEXPANDER_PCA9555
       ret = tdeck_xl9555_initialize(i2c);
       if (ret < 0)

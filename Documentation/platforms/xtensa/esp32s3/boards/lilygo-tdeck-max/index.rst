@@ -49,7 +49,9 @@ The port is being written part by part.  Supported so far:
 * the keyboard as ``/dev/kbd0`` (``full``);
 * the touch screen as ``/dev/input0``, and the keys on the glass below it
   as ``/dev/softkeys`` (``full``);
-* the microSD card as ``/dev/mmcsd0``, with FAT (``full``).
+* the microSD card as ``/dev/mmcsd0``, with FAT (``full``);
+* the fuel gauge as ``/dev/batt0``, the charger as ``/dev/charger0``, and
+  ``poweroff`` (``full``).
 
 Serial Console
 ==============
@@ -293,6 +295,39 @@ system::
 * FAT only: cards of 64 GB and more, sold with exFAT, need formatting
   with FAT32 first.
 
+Battery
+=======
+
+The cell is a 1400 mAh Li-Po (``BOARD_BATTERY_MAH``).  A BQ27220 fuel gauge
+(I2C address 0x55) measures it and an SY6970 (0x6A) charges it from USB;
+``full`` registers them as ``/dev/batt0`` and ``/dev/charger0``.  Both chips
+are powered by the cell, not the board: they keep their settings across the
+board's resets, but not across the cell being disconnected, so the board
+applies its settings at every start.
+
+* The gauge's values, read with the ``BATIOC_*`` ioctls, are plain
+  integers: millivolts, percent, milliamps (positive while charging) and
+  tenths of a degree Celsius.  The ``batterydump`` command decodes them as
+  fixed point, so it prints wrong values for this gauge.
+* The gauge stretches the I2C clock for longer than the ESP32-S3's
+  default timeout allows, and its reads fail without
+  ``ESP32S3_I2C_SCL_TIMEOUT_US=20000``, which ``full`` sets.
+* At start the board checks the gauge's design capacity against
+  ``BOARD_BATTERY_MAH`` and writes it, with the initial full charge
+  capacity, only when they differ, which normally means the cell was
+  disconnected.  The write unseals the gauge with TI's default keys and
+  takes about two seconds.
+* The charger charges to 4288 mV at 1024 mA (``BOARD_CHARGE_MV``,
+  ``BOARD_CHARGE_MA``), the values the vendor's firmware sets.  4288 mV is
+  above the usual 4.20 V, and the cell's rating is not published.  The
+  driver turns off the charger's I2C watchdog: when it expires, the charger
+  puts its settings back to their defaults (4208 mV).
+* ``poweroff`` (``BOARDIOC_POWEROFF``) has the charger cut the cell off
+  (ship mode), which leaves only the cell's own chips powered.  Plugging
+  in USB power should end ship mode, as on the BQ25895; this has not been
+  tried on the board yet.  On USB power the board cannot be turned off,
+  and ``poweroff`` fails with ``EBUSY``.
+
 Configurations
 ==============
 
@@ -316,7 +351,9 @@ Every part the port supports so far: ``nsh``, plus the I2C bus
 test pattern), both lights (``/dev/pwm0``, the ``pwm`` command), the
 keyboard (``/dev/kbd0``, the ``kbd`` command), the touch screen
 (``/dev/input0``, the ``tc`` command), the soft keys
-(``/dev/softkeys``) and the microSD card (``/dev/mmcsd0``, with FAT), and
+(``/dev/softkeys``), the microSD card (``/dev/mmcsd0``, with FAT), the
+fuel gauge (``/dev/batt0``), the charger (``/dev/charger0``) and
+``poweroff``, and
 the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset

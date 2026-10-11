@@ -122,6 +122,19 @@ int tdeck_touch_initialize(FAR struct i2c_master_s *i2c);
 #endif
 
 /****************************************************************************
+ * Name: tdeck_battery_initialize
+ *
+ * Description:
+ *   Register the fuel gauge as /dev/batt0 and the charger as /dev/charger0.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_BQ27220) || defined(CONFIG_SY6970)
+struct i2c_master_s;
+int tdeck_battery_initialize(FAR struct i2c_master_s *i2c);
+#endif
+
+/****************************************************************************
  * Name: tdeck_lora_sleep
  *
  * Description:
