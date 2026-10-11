@@ -100,6 +100,18 @@ config MCP73871
 	---help---
 		A simple driver to report MCP73871 status.
 
+config SY6970
+	bool "SY6970 Battery charger support"
+	default n
+	select I2C
+	depends on BATTERY_CHARGER
+	---help---
+		The Silergy SY6970 is a single cell buck charger with power path
+		management and adapter detection, register compatible with the TI
+		BQ25895.  The driver reports charge status, faults and input power,
+		and sets the charge voltage, charge current and input current
+		limit.
+
 config BATTERY_GAUGE
 	bool "Battery Fuel Gauge support"
 	default n

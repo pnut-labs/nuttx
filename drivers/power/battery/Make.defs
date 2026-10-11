@@ -50,6 +50,12 @@ ifeq ($(CONFIG_I2C_AXP202),y)
 CSRCS += axp202.c
 endif
 
+# Add the SY6970 I2C-based battery charger driver
+
+ifeq ($(CONFIG_SY6970),y)
+CSRCS += sy6970.c
+endif
+
 endif
 
 # Add battery gauge drivers

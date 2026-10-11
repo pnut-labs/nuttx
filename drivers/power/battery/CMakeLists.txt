@@ -54,6 +54,12 @@ if(CONFIG_BATTERY_CHARGER)
     list(APPEND SRCS axp202.c)
   endif()
 
+  # Add the SY6970 I2C-based battery charger driver
+
+  if(CONFIG_SY6970)
+    list(APPEND SRCS sy6970.c)
+  endif()
+
 endif()
 
 # Add battery gauge drivers
