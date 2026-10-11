@@ -146,5 +146,21 @@ int tdeck_battery_initialize(FAR struct i2c_master_s *i2c);
 int tdeck_lora_sleep(void);
 #endif
 
+/****************************************************************************
+ * Name: tdeck_lora_initialize
+ *
+ * Description:
+ *   Register the SX1262 as /dev/lora0 (NuttX's SX126x driver).  The radio
+ *   stays asleep while the device is closed.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_ESP32S3_SPI2) && defined(CONFIG_LPWAN_SX126X)
+int tdeck_lora_initialize(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_XTENSA_ESP32S3_LILYGO_TDECK_MAX_SRC_LILYGO_TDECK_MAX_H */

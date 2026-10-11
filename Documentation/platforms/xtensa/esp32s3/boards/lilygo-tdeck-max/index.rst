@@ -51,7 +51,8 @@ The port is being written part by part.  Supported so far:
   as ``/dev/softkeys`` (``full``);
 * the microSD card as ``/dev/mmcsd0``, with FAT (``full``);
 * the fuel gauge as ``/dev/batt0``, the charger as ``/dev/charger0``, and
-  ``poweroff`` (``full``).
+  ``poweroff`` (``full``);
+* the LoRa radio as ``/dev/lora0``, and the ``lora`` command (``full``).
 
 Serial Console
 ==============
@@ -328,6 +329,35 @@ applies its settings at every start.
   tried on the board yet.  On USB power the board cannot be turned off,
   and ``poweroff`` fails with ``EBUSY``.
 
+LoRa
+====
+
+The SX1262 is registered as ``/dev/lora0`` with NuttX's SX126x driver
+(``LPWAN_SX126X``), and the ``lora`` command sends and receives packets with
+the frequency, spreading factor, bandwidth, coding rate, power, sync word and
+preamble given on the command line::
+
+    nsh> lora tx hello
+    nsh> lora -t 30 rx
+
+* The module is the 868 MHz variant, with a TCXO powered from DIO3 at 2.4 V
+  and its RF switch on DIO2.  The board allows 863-870 MHz and -9 to
+  +22 dBm; ``lora`` sends at 14 dBm unless told otherwise.  Mind the band's
+  duty cycle limits.
+* The radio sleeps from boot (``full`` switches its rail on), is reset when
+  ``/dev/lora0`` is opened and put back to sleep when it is closed.  DIO1
+  (GPIO5) is its interrupt, level triggered.
+* The driver waits for the chip's BUSY line before every command, clears
+  the chip's interrupt status in its worker, returns received packets with
+  their RSSI and SNR, and takes a receive timeout
+  (``SX126XIOC_RXTIMEOUTSET``) and a LoRa sync word
+  (``SX126XIOC_SYNCWORDSET``).  Its setup starts the TCXO, calibrates, and
+  applies the datasheet's known-limitation fixes.
+* A send takes its time on air and a few milliseconds more: 130 ms for
+  124 ms on air at SF9 and 125 kHz.  In earlier firmware, the same driver
+  exchanged packets both ways with a MeshCore node (a T-Watch S3 at
+  869.618 MHz, 62.5 kHz, SF8).
+
 Configurations
 ==============
 
@@ -352,8 +382,8 @@ test pattern), both lights (``/dev/pwm0``, the ``pwm`` command), the
 keyboard (``/dev/kbd0``, the ``kbd`` command), the touch screen
 (``/dev/input0``, the ``tc`` command), the soft keys
 (``/dev/softkeys``), the microSD card (``/dev/mmcsd0``, with FAT), the
-fuel gauge (``/dev/batt0``), the charger (``/dev/charger0``) and
-``poweroff``, and
+fuel gauge (``/dev/batt0``), the charger (``/dev/charger0``),
+``poweroff``, the LoRa radio (``/dev/lora0``, the ``lora`` command), and
 the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset
