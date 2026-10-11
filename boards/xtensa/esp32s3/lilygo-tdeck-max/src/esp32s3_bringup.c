@@ -142,6 +142,17 @@ int esp32s3_bringup(void)
                      "ERROR: Failed to put the SX1262 to sleep: %d\n",
                      ret);
             }
+
+#      ifdef CONFIG_LPWAN_SX126X
+          /* The radio, as /dev/lora0 */
+
+          ret = tdeck_lora_initialize();
+          if (ret < 0)
+            {
+              syslog(LOG_ERR, "ERROR: Failed to register /dev/lora0: %d\n",
+                     ret);
+            }
+#      endif
 #    endif
 
 #    ifdef CONFIG_INPUT_TCA8418
