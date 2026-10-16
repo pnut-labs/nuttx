@@ -231,5 +231,43 @@ int tdeck_haptic_initialize(void);
 int tdeck_imu_initialize(void);
 #endif
 
+/****************************************************************************
+ * Name: tdeck_radios_initialize
+ *
+ * Description:
+ *   Register /dev/wifi_en and /dev/ble_en, which bring Wi-Fi and Bluetooth
+ *   LE up when 1 is written to them, and bring up those that the board is
+ *   configured to start at boot (LILYGO_TDECK_MAX_BOOT_WIFI,
+ *   LILYGO_TDECK_MAX_BOOT_BLE).
+ *
+ * Returned Value:
+ *   Zero (OK).
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_ESPRESSIF_WIRELESS
+int tdeck_radios_initialize(void);
+#endif
+
+/****************************************************************************
+ * Name: tdeck_wifi_enable, tdeck_ble_enable
+ *
+ * Description:
+ *   Bring Wi-Fi or Bluetooth LE up, if it is not up already.  There is no
+ *   way back down.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_ESPRESSIF_WIFI
+int tdeck_wifi_enable(void);
+#endif
+
+#ifdef CONFIG_ESPRESSIF_BLE
+int tdeck_ble_enable(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_XTENSA_ESP32S3_LILYGO_TDECK_MAX_SRC_LILYGO_TDECK_MAX_H */

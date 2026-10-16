@@ -5,4 +5,44 @@
 
 if ARCH_BOARD_LILYGO_TDECK_MAX
 
+config LILYGO_TDECK_MAX_BOOT_WIFI
+	bool "Bring up Wi-Fi at boot"
+	default n
+	depends on ESPRESSIF_WIFI
+	---help---
+		Wi-Fi is left uninitialised by default.  Initialising it takes a
+		large part of the internal heap, and the network stack starts the
+		radio when it brings wlan0 up, so an idle handheld would otherwise
+		keep it running for nothing.
+
+		It can be brought up at runtime instead:
+
+		    gpio -o 1 /dev/wifi_en
+		    ifup wlan0
+
+		There is no way to take it down again short of a reset, although
+		ifdown and ifup stop and start the radio once it is up.
+
+		Bringing it up at boot needs BOARD_INITTHREAD_STACKSIZE of at
+		least 4096.  Anything smaller is refused at build time, because
+		the failure is a silent reset loop.
+
+config LILYGO_TDECK_MAX_BOOT_BLE
+	bool "Bring up Bluetooth LE at boot"
+	default n
+	depends on ESPRESSIF_BLE
+	---help---
+		BLE is left uninitialised by default: bringing it up enables the
+		controller, which stays enabled.
+
+		It can be brought up at runtime instead:
+
+		    gpio -o 1 /dev/ble_en
+		    ifup bnep0
+
+		Bringing it up at boot needs BOARD_INITTHREAD_STACKSIZE of at
+		least 4096, as for Wi-Fi.
+
+		There is no way to take it down again short of a reset.
+
 endif # ARCH_BOARD_LILYGO_TDECK_MAX

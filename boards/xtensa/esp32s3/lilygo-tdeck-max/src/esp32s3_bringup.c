@@ -257,6 +257,14 @@ int esp32s3_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_ESPRESSIF_WIRELESS
+  /* Wi-Fi and Bluetooth LE, off until asked for (/dev/wifi_en,
+   * /dev/ble_en)
+   */
+
+  tdeck_radios_initialize();
+#endif
+
 #ifdef CONFIG_ESPRESSIF_LEDC
   /* The front light and the keyboard's backlight, as /dev/pwm0 */
 
