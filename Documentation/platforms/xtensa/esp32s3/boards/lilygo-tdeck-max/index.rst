@@ -52,7 +52,9 @@ The port is being written part by part.  Supported so far:
 * the microSD card as ``/dev/mmcsd0``, with FAT (``full``);
 * the fuel gauge as ``/dev/batt0``, the charger as ``/dev/charger0``, and
   ``poweroff`` (``full``);
-* the LoRa radio as ``/dev/lora0``, and the ``lora`` command (``full``).
+* the LoRa radio as ``/dev/lora0``, and the ``lora`` command (``full``);
+* the GNSS receiver through NuttX's GNSS upper half, and the ``gps``
+  command (``full``).
 
 Serial Console
 ==============
@@ -358,6 +360,31 @@ preamble given on the command line::
   exchanged packets both ways with a MeshCore node (a T-Watch S3 at
   869.618 MHz, 62.5 kHz, SF8).
 
+GNSS
+====
+
+The u-blox MIA-M10Q talks NMEA on UART1 (``/dev/ttyS0``) at 38400 baud.
+``full`` registers it with NuttX's GNSS upper half (``SENSORS_GNSS``), which
+parses the sentences into the uORB topics ``sensor_gnss`` and
+``sensor_gnss_satellite`` and passes them through ``/dev/ttyGNSS0``::
+
+    nsh> gps -t 60
+
+``gps`` waits for a fix, reports the satellites in view while it waits and
+prints the position in lines that fit 40 columns; ``-s`` sets the system
+clock from the fix.
+
+* The receiver is powered while any of these is in use: the first user
+  switches the ``gps_en`` rail on and starts a thread that feeds the UART
+  to the upper half; five seconds after the last user has gone, the thread
+  stops and the rail goes off, so that a program that closes and opens it
+  again does not cost a cold start.
+* Writing to ``/dev/ttyGNSS0`` sends commands (NMEA or UBX) to the
+  receiver.
+* The build downloads the minmea library, which needs ``unzip``.
+* Indoors, from a cold start, it reports satellites in view; a position
+  fix has not been tried with a view of the sky yet.
+
 Configurations
 ==============
 
@@ -383,7 +410,9 @@ keyboard (``/dev/kbd0``, the ``kbd`` command), the touch screen
 (``/dev/input0``, the ``tc`` command), the soft keys
 (``/dev/softkeys``), the microSD card (``/dev/mmcsd0``, with FAT), the
 fuel gauge (``/dev/batt0``), the charger (``/dev/charger0``),
-``poweroff``, the LoRa radio (``/dev/lora0``, the ``lora`` command), and
+``poweroff``, the LoRa radio (``/dev/lora0``, the ``lora`` command), the
+GNSS receiver (``/dev/ttyGNSS0`` and its uORB topics, the ``gps``
+command), and
 the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset

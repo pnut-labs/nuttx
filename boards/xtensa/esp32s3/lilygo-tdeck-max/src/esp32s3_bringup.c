@@ -178,6 +178,17 @@ int esp32s3_bringup(void)
                      ret);
             }
 #    endif
+
+#    ifdef CONFIG_SENSORS_GNSS
+          /* The GNSS receiver, powered through the XL9555 while in use */
+
+          ret = tdeck_gnss_initialize();
+          if (ret < 0)
+            {
+              syslog(LOG_ERR, "ERROR: Failed to initialize the GNSS: %d\n",
+                     ret);
+            }
+#    endif
         }
 #  endif
     }
