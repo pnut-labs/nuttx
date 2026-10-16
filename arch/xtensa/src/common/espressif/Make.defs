@@ -160,3 +160,13 @@ include common$(DELIM)espressif$(DELIM)Wireless.mk
 endif
 
 INCLUDES += ${INCDIR_PREFIX}$(ARCH_SRCDIR)$(DELIM)common$(DELIM)espressif$(DELIM)platform_include
+
+# The HAL releases memory from heap_caps_malloc() with plain free().  NuttX's
+# heap_caps_malloc() takes it from the kernel heap, and with a separate user
+# heap free() would hand it to the wrong heap: have free() in the HAL's
+# components go back to the heap the block came from.
+
+ifeq ($(CONFIG_MM_KERNEL_HEAP),y)
+chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)%$(OBJEXT): \
+  CFLAGS += -include $(ARCH_SRCDIR)$(DELIM)common$(DELIM)espressif$(DELIM)esp_hal_free.h
+endif

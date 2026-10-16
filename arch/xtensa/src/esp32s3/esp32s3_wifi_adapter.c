@@ -52,6 +52,7 @@
 #include "platform/os.h"
 #include "espressif/esp_wireless.h"
 #include "espressif/esp_wifi_utils.h"
+#include "espressif/esp_timer_adapter.h"
 
 #include "esp32s3_wifi_adapter.h"
 #include "periph_ctrl.h"
@@ -3594,6 +3595,20 @@ static unsigned long esp_random_ulong(void)
 #ifdef CONFIG_ESPRESSIF_WIFI_BT_COEXIST
 int esp_wifi_bt_coexist_init(void)
 {
+  int ret;
+
+  /* The arbiter's timers need the esp_timer subsystem, which the Wi-Fi
+   * start only brings up later: without it, creating them fails and the
+   * arbiter runs without its timers.  The call is idempotent.
+   */
+
+  ret = esp_hr_timer_init();
+  if (ret < 0)
+    {
+      wlerr("Failed to initialize HR Timer error=%d\n", ret);
+      return -EIO;
+    }
+
   esp_coex_adapter_register(&g_coex_adapter_funcs);
   coex_pre_init();
 
