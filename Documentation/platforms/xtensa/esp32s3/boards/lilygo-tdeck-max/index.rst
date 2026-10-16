@@ -59,7 +59,9 @@ The port is being written part by part.  Supported so far:
 * the audio codec as ``/dev/audio/pcm0`` and ``/dev/audio/pcm_in0``, with
   ``nxplayer`` and ``nxrecorder`` (``full``);
 * the vibration motor as ``/dev/input_ff0``, and the ``haptic`` command
-  (``full``).
+  (``full``);
+* the IMU's accelerometer and gyroscope as uORB topics, with the
+  ``sensortest`` command (``full``).
 
 Serial Console
 ==============
@@ -486,8 +488,6 @@ parse WAV headers: WAV files do not play.  ``nxplayer`` and
   and its audio buffer comes back empty, so a recording stops growing,
   and ``stop`` still works.  Ten seconds recorded into ``/tmp`` lost
   nothing.
-* ``full`` gives ``nxplayer`` and ``nxrecorder`` 4 KB stacks: with 2 KB,
-  ``nxplayer`` overflowed its stack on ``playraw``.
 * The ESP32-S3's I2S driver and the ES8311 driver needed fixes for this,
   found with earlier firmware for this board: receive clocks in
   full-duplex master mode, mono slot selection, a receiver that keeps
@@ -496,6 +496,30 @@ parse WAV headers: WAV files do not play.  ``nxplayer`` and
   sources that the ROM leaves attached (UART0 on CPU interrupt 5)
   detached at start-up: the I2S output's DMA got the same CPU interrupt,
   and UART0's interrupt, which nothing cleared, never stopped.
+
+IMU
+===
+
+The BHI260AP smart sensor hub, at I2C address 0x28 and powered by the
+XL9555's ``imu_en`` line, is registered with the ``bhi260ap`` driver
+(``SENSORS_BHI260AP``) as the uORB topics ``sensor_accel0`` and
+``sensor_gyro0``, which ``sensortest`` reads::
+
+    nsh> sensortest -n 5 -i 20000 accel0
+    nsh> sensortest -n 5 -i 20000 gyro0
+
+* The chip runs a firmware image from its program RAM.  The driver uploads
+  Bosch's standard BHI260AP image when a sensor is first activated (about
+  3.5 s over I2C at 400 kHz) and leaves it running.
+* The image is not kept in this tree: the build downloads ``BHI260AP.fw``
+  from Bosch Sensortec's BHI2xy SensorAPI, under that repository's
+  BSD-3-Clause license, at a fixed commit, checks its SHA-256, and includes
+  it in the firmware (``esp32s3_imu_fw.S``).  Building with the IMU needs
+  the network the first time, and again after ``make distclean``, which
+  deletes the image.
+* The accelerometer (m/s², 8 g range) and the gyroscope (rad/s, 2000
+  degrees/s) are the firmware's passthrough sensors, at 50 Hz by default.
+  Their host interrupt on GPIO21 is level triggered.
 
 Vibration motor
 ===============
@@ -554,12 +578,16 @@ GNSS receiver (``/dev/ttyGNSS0`` and its uORB topics, the ``gps``
 command), the modem (``/dev/ttyS1``, the ``modem`` command), the audio
 codec (``/dev/audio/pcm0``, ``/dev/audio/pcm_in0``, ``nxplayer``,
 ``nxrecorder``), the vibration motor (``/dev/input_ff0``, the ``haptic``
-command), and
+command), the IMU (the uORB topics ``sensor_accel0`` and ``sensor_gyro0``,
+the ``sensortest`` command), and
 the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset
 reason (1 is a power-up, 3 a software reset, 21 a reset over USB, as
 ``esptool`` does).
+
+Programs get 4 KB stacks by default (``DEFAULT_TASK_STACKSIZE``): with
+2 KB, ``nxplayer`` and ``uorb_listener`` overflowed theirs.
 
 Debugging
 =========

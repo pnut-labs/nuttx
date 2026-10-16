@@ -215,6 +215,17 @@ int esp32s3_bringup(void)
                      ret);
             }
 #    endif
+
+#    ifdef CONFIG_SENSORS_BHI260AP
+          /* The IMU, as uORB topics: the XL9555 has powered it */
+
+          ret = tdeck_imu_initialize();
+          if (ret < 0)
+            {
+              syslog(LOG_ERR, "ERROR: Failed to initialize the IMU: %d\n",
+                     ret);
+            }
+#    endif
         }
 #  endif
     }

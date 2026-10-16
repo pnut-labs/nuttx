@@ -64,6 +64,50 @@ ifeq ($(CONFIG_FF_DRV2605)$(CONFIG_IOEXPANDER_PCA9555),yy)
 CSRCS += esp32s3_haptic.c
 endif
 
+# The IMU runs Bosch's firmware image, which the build downloads from
+# Bosch's BHI2xy SensorAPI (BSD-3-Clause) at a fixed commit and checks
+# before esp32s3_imu_fw.S includes it
+
+ifeq ($(CONFIG_SENSORS_BHI260AP),y)
+CSRCS += esp32s3_imu.c
+ASRCS += esp32s3_imu_fw.S
+
+BHI260AP_FW_DIR    = $(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)board$(DELIM)board
+BHI260AP_FW        = $(BHI260AP_FW_DIR)$(DELIM)bhi260ap.fw
+BHI260AP_FW_COMMIT = 177681d120ac42760c9f19505697ccd5c7103e87
+BHI260AP_FW_SHA256 = 318def511fd8eb762bf1e61cf02cfd6ecac70f8627d3bacfa7d24a1641f9e915
+BHI260AP_FW_URL    = https://raw.githubusercontent.com/boschsensortec/BHI2xy_SensorAPI/$(BHI260AP_FW_COMMIT)/firmware/bhi260ap/BHI260AP.fw
+
+BHI260AP_SHA256SUM := $(if $(shell command -v sha256sum 2> /dev/null),sha256sum,shasum -a 256)
+
+AFLAGS += -Wa,-I$(BHI260AP_FW_DIR)
+
+# The image is checked on every build and downloaded again if it is not the
+# one named here; it only changes, and esp32s3_imu_fw.S is only assembled
+# again, when it was missing or wrong
+
+.PHONY: bhi260ap_fw_check
+bhi260ap_fw_check:
+
+$(BHI260AP_FW): bhi260ap_fw_check
+	$(Q) if ! echo "$(BHI260AP_FW_SHA256)  $@" | \
+	        $(BHI260AP_SHA256SUM) -c --status 2> /dev/null; then \
+	       echo "Downloading Bosch's BHI260AP firmware image"; \
+	       curl -sSfL -o $@.tmp $(BHI260AP_FW_URL) || \
+	         { echo "Could not download $(BHI260AP_FW_URL)"; exit 1; }; \
+	       echo "$(BHI260AP_FW_SHA256)  $@.tmp" | \
+	         $(BHI260AP_SHA256SUM) -c --status || \
+	         { echo "The downloaded image does not match"; exit 1; }; \
+	       mv $@.tmp $@; \
+	     fi
+
+esp32s3_imu_fw$(OBJEXT): $(BHI260AP_FW)
+
+distclean::
+	$(call DELFILE, $(BHI260AP_FW))
+	$(call DELFILE, $(BHI260AP_FW).tmp)
+endif
+
 ifneq ($(CONFIG_BQ27220)$(CONFIG_SY6970),)
 CSRCS += esp32s3_battery.c
 endif
