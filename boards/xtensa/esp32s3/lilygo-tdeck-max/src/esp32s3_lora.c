@@ -151,13 +151,16 @@ static int tdeck_lora_irq0attach(xcpt_t handler, FAR void *arg)
 {
   int ret;
 
+  /* It returns 1 (-ERROR), not a negated errno, when it fails */
+
   ret = esp_gpio_irq(BOARD_LORA_DIO1, handler, arg);
-  if (ret < 0)
+  if (ret != OK)
     {
       wlerr("ERROR: Failed to attach GPIO%d: %d\n", BOARD_LORA_DIO1, ret);
+      return ret < 0 ? ret : -EIO;
     }
 
-  return ret;
+  return OK;
 }
 
 /****************************************************************************
