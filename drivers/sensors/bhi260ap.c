@@ -427,9 +427,22 @@ static void bhi260ap_event(FAR struct bhi260ap_dev_s *dev,
                            FAR const uint8_t *event, uint64_t timestamp)
 {
   FAR struct bhi260ap_sensor_s *sensor;
-  float x = (int16_t)(event[1] | (event[2] << 8));
-  float y = (int16_t)(event[3] | (event[4] << 8));
-  float z = (int16_t)(event[5] | (event[6] << 8));
+  float x;
+  float y;
+  float z;
+
+  /* Only the sensors' events have the three axes: the system events can
+   * be as short as one byte, at the end of what was read
+   */
+
+  if (event[0] != BHI_ID_ACC && event[0] != BHI_ID_GYRO)
+    {
+      return;
+    }
+
+  x = (int16_t)(event[1] | (event[2] << 8));
+  y = (int16_t)(event[3] | (event[4] << 8));
+  z = (int16_t)(event[5] | (event[6] << 8));
 
   if (event[0] == BHI_ID_ACC)
     {

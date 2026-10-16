@@ -93,11 +93,13 @@ static int tdeck_imu_attach(FAR const struct bhi260ap_config_s *config,
 {
   int ret;
 
+  /* esp_gpio_irq() returns 1 (-ERROR), not a negated errno, on failure */
+
   ret = esp_gpio_irq(BOARD_IMU_INT, isr, arg);
-  if (ret < 0)
+  if (ret != OK)
     {
       snerr("ERROR: Failed to attach GPIO%d: %d\n", BOARD_IMU_INT, ret);
-      return ret;
+      return ret < 0 ? ret : -EIO;
     }
 
   esp_gpioirqdisable(BOARD_IMU_INT);
