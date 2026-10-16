@@ -189,6 +189,19 @@ int esp32s3_bringup(void)
                      ret);
             }
 #    endif
+
+#    if defined(CONFIG_AUDIO_ES8311) && defined(CONFIG_ESPRESSIF_I2S0)
+          /* The codec, as /dev/audio/pcm0 and /dev/audio/pcm_in0; the
+           * XL9555 switches the speaker's amplifier
+           */
+
+          ret = tdeck_audio_initialize();
+          if (ret < 0)
+            {
+              syslog(LOG_ERR, "ERROR: Failed to initialize audio: %d\n",
+                     ret);
+            }
+#    endif
         }
 #  endif
     }

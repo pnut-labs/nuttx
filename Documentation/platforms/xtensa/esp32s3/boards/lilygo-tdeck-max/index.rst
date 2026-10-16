@@ -55,7 +55,9 @@ The port is being written part by part.  Supported so far:
 * the LoRa radio as ``/dev/lora0``, and the ``lora`` command (``full``);
 * the GNSS receiver through NuttX's GNSS upper half, and the ``gps``
   command (``full``);
-* the modem on UART2, and the ``modem`` command (``full``).
+* the modem on UART2, and the ``modem`` command (``full``);
+* the audio codec as ``/dev/audio/pcm0`` and ``/dev/audio/pcm_in0``, with
+  ``nxplayer`` and ``nxrecorder`` (``full``).
 
 Serial Console
 ==============
@@ -436,6 +438,61 @@ Found with earlier firmware for this board:
   the modem's link); the operator's path dropped packets over 1480 bytes,
   so the TUN MTU wants 1440.
 
+Audio
+=====
+
+The ES8311 codec on I2S0 is registered with the ``es8311`` driver
+(``AUDIO_ES8311``) as ``/dev/audio/pcm0`` for playback, through the PCM
+decoder so that WAV files play, and ``/dev/audio/pcm_in0`` for recording
+from the microphone, an analog electret on the codec's MIC1 input, with
+30 dB of analog and 36 dB of digital gain (``ES8311_MIC_GAIN``).
+``nxplayer`` and ``nxrecorder`` drive them, for example with raw 16-bit mono
+files at 16 kHz on the microSD card::
+
+    nsh> nxrecorder
+    nxrecorder> device /dev/audio/pcm_in0
+    nxrecorder> recordraw /mnt/sd/rec.raw 1 16 16000
+    nxrecorder> stop
+    nxrecorder> q
+    nsh> nxplayer
+    nxplayer> device /dev/audio/pcm0
+    nxplayer> volume 50
+    nxplayer> playraw /mnt/sd/rec.raw 1 16 16000
+    nxplayer> q
+
+* ``pcm0`` and ``pcm_in0`` are the same codec, set up twice: use one at a
+  time, as closing either resets the codec.
+* The speaker's amplifier (``amp_en``) is on while the playback device is
+  reserved, and goes off when it is closed for the last time, even by a
+  player that was killed.  Between streams the codec's analog side is
+  powered down.
+* A player killed mid-stream leaves ``pcm0`` reserved: it is busy until
+  the next restart.
+* The vendor's pin table and macros name the two data lines the other way
+  round from the schematic: the ESP32-S3 sends on GPIO40 (the codec's
+  DSDIN) and receives on GPIO17 (its ASDOUT).
+* Writes to the microSD card put low-frequency noise on the microphone, at
+  the rate the recorder writes buffers and its harmonics.  ``full`` raises
+  the ADC's high-pass filter (``ES8311_ADC_HPF=4``), which takes it down
+  by about 30 dB below 20 Hz while costing speech about 3 dB at
+  200-500 Hz.  The vibration motor is picked up too.
+* Every transfer goes through a buffer in internal RAM, where the DMA
+  works: the heap spans internal RAM and PSRAM, and a buffer that lands in
+  PSRAM is refused.  When no such buffer can be had, the transfer fails
+  and its audio buffer comes back empty, so a recording stops growing,
+  and ``stop`` still works.  Ten seconds recorded into ``/tmp`` lost
+  nothing.
+* ``full`` gives ``nxplayer`` and ``nxrecorder`` 4 KB stacks: with 2 KB,
+  ``nxplayer`` overflowed its stack on ``playraw``.
+* The ESP32-S3's I2S driver and the ES8311 driver needed fixes for this,
+  found with earlier firmware for this board: receive clocks in
+  full-duplex master mode, mono slot selection, a receiver that keeps
+  running across buffers, DMA buffers in internal RAM, and buffers that
+  were lost or never completed.  Playback also needed the interrupt
+  sources that the ROM leaves attached (UART0 on CPU interrupt 5)
+  detached at start-up: the I2S output's DMA got the same CPU interrupt,
+  and UART0's interrupt, which nothing cleared, never stopped.
+
 Configurations
 ==============
 
@@ -463,7 +520,9 @@ keyboard (``/dev/kbd0``, the ``kbd`` command), the touch screen
 fuel gauge (``/dev/batt0``), the charger (``/dev/charger0``),
 ``poweroff``, the LoRa radio (``/dev/lora0``, the ``lora`` command), the
 GNSS receiver (``/dev/ttyGNSS0`` and its uORB topics, the ``gps``
-command), the modem (``/dev/ttyS1``, the ``modem`` command), and
+command), the modem (``/dev/ttyS1``, the ``modem`` command), the audio
+codec (``/dev/audio/pcm0``, ``/dev/audio/pcm_in0``, ``nxplayer``,
+``nxrecorder``), and
 the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset

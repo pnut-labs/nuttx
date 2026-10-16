@@ -52,6 +52,12 @@ ifeq ($(CONFIG_SENSORS_GNSS)$(CONFIG_IOEXPANDER_PCA9555),yy)
 CSRCS += esp32s3_gnss.c
 endif
 
+# The speaker's amplifier is one of the XL9555's lines
+
+ifeq ($(CONFIG_AUDIO_ES8311)$(CONFIG_ESPRESSIF_I2S0)$(CONFIG_IOEXPANDER_PCA9555),yyy)
+CSRCS += esp32s3_audio.c
+endif
+
 ifneq ($(CONFIG_BQ27220)$(CONFIG_SY6970),)
 CSRCS += esp32s3_battery.c
 endif

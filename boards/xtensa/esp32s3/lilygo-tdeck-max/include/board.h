@@ -102,6 +102,7 @@
 #define BOARD_I2S_WS              18
 #define BOARD_I2S_DOUT            40    /* To the codec's DSDIN */
 #define BOARD_I2S_DIN             17    /* From the codec's ASDOUT */
+#define BOARD_I2C_ADDR_ES8311     0x18  /* Its control interface */
 
 /* The battery: one Li-Po cell, which the fuel gauge (BQ27220) is told,
  * and what the charger (SY6970) charges it with: the vendor's firmware's
