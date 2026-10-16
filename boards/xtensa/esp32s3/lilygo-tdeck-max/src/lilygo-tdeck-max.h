@@ -180,5 +180,23 @@ int tdeck_lora_initialize(void);
 int tdeck_gnss_initialize(void);
 #endif
 
+/****************************************************************************
+ * Name: tdeck_audio_initialize
+ *
+ * Description:
+ *   Register the ES8311 codec: /dev/audio/pcm0 for playback, through the
+ *   PCM decoder, with the speaker's amplifier on while it is reserved, and
+ *   /dev/audio/pcm_in0 for recording from the microphone.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_AUDIO_ES8311) && defined(CONFIG_ESPRESSIF_I2S0) && \
+    defined(CONFIG_IOEXPANDER_PCA9555)
+int tdeck_audio_initialize(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_XTENSA_ESP32S3_LILYGO_TDECK_MAX_SRC_LILYGO_TDECK_MAX_H */
