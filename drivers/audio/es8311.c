@@ -681,14 +681,9 @@ static int es8311_setsamplerate(FAR struct es8311_dev_s *priv)
   int coeff_index;
   int ret;
 
-  priv->mclk = I2S_GETMCLKFREQUENCY(priv->i2s);
-  coeff_index = es8311_getcoeff(priv, priv->samprate);
-
-  if (coeff_index < 0)
-    {
-      auderr("Failed to set sample rate: %d\n", -EINVAL);
-      return -EINVAL;
-    }
+  /* Set the I2S rate first: MCLK follows it, and the codec's clock
+   * dividers depend on both
+   */
 
   ret = I2S_RXSAMPLERATE(priv->i2s, priv->samprate);
   if (ret < 0)
@@ -702,6 +697,16 @@ static int es8311_setsamplerate(FAR struct es8311_dev_s *priv)
     {
       auderr("I2S_TXSAMPLERATE failed.\n");
       return ret;
+    }
+
+  priv->mclk = I2S_GETMCLKFREQUENCY(priv->i2s);
+  coeff_index = es8311_getcoeff(priv, priv->samprate);
+
+  if (coeff_index < 0)
+    {
+      auderr("No clock setting for MCLK %" PRIu32 " Hz at %" PRIu32 " Hz\n",
+             priv->mclk, priv->samprate);
+      return -EINVAL;
     }
 
   ret = 0;
@@ -824,6 +829,12 @@ static int es8311_getcaps(FAR struct audio_lowerhalf_s *dev, int type,
 
         if (caps->ac_subtype == AUDIO_TYPE_QUERY)
           {
+              /* The input formats we can decode / accept */
+
+#ifdef CONFIG_AUDIO_FORMAT_PCM
+              caps->ac_format.hw |= (1 << (AUDIO_FMT_PCM - 1));
+#endif
+
               /* The types of audio units we implement */
 
               caps->ac_controls.b[0] = AUDIO_TYPE_INPUT |
@@ -1042,13 +1053,37 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
         priv->samprate  = caps->ac_controls.hw[0];
         priv->bpsamp    = caps->ac_controls.b[2];
 
-        ret = es8311_setsamplerate(priv) == -ENOTTY ? OK : ret;
+        /* Either may be unsupported (-ENOTTY), which is not an error */
+
+        ret = es8311_setsamplerate(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
+
         if (ret < 0)
           {
             break;
           }
 
-        ret = es8311_setbitspersample(priv) == -ENOTTY ? OK : ret;
+        ret = es8311_setbitspersample(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
+
+        if (ret < 0)
+          {
+            break;
+          }
+
+        /* Tell the I2S how many slots the stream has */
+
+        ret = I2S_TXCHANNELS(priv->i2s, caps->ac_channels);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
       }
       break;
 
@@ -1089,13 +1124,40 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
         priv->samprate  = caps->ac_controls.hw[0];
         priv->bpsamp    = caps->ac_controls.b[2];
 
-        ret = es8311_setsamplerate(priv) == -ENOTTY ? OK : ret;
-        if (ret != OK)
+        /* Either may be unsupported (-ENOTTY), which is not an error */
+
+        ret = es8311_setsamplerate(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
+
+        if (ret < 0)
           {
             break;
           }
 
-        ret = es8311_setbitspersample(priv) == -ENOTTY ? OK : ret;
+        ret = es8311_setbitspersample(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
+
+        if (ret < 0)
+          {
+            break;
+          }
+
+        /* Tell the I2S how many slots the stream has: a mono stream is the
+         * left one, the ADC (the right one carries the ADC too, or the DAC
+         * as an echo reference, see ES8311_GPIO_REG44)
+         */
+
+        ret = I2S_RXCHANNELS(priv->i2s, caps->ac_channels);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
       }
       break;
 
@@ -1324,6 +1386,18 @@ static int es8311_processbegin(FAR struct es8311_dev_s *priv)
   while (priv->inflight < CONFIG_ES8311_INFLIGHT &&
          dq_peek(&priv->pendq) != NULL && !priv->paused)
     {
+      /* An empty buffer is completed here rather than sent (below), so
+       * that it goes back after the ones before it: wait until they have
+       * completed.  Their completion brings the worker back here.
+       */
+
+      apb = (FAR struct ap_buffer_s *)dq_peek(&priv->pendq);
+      if (priv->audio_mode == ES_MODULE_DAC &&
+          apb->curbyte >= apb->nbytes && priv->inflight > 0)
+        {
+          break;
+        }
+
       /* Take next buffer from the queue of pending transfers */
 
       apb = (FAR struct ap_buffer_s *)dq_remfirst(&priv->pendq);
@@ -1362,7 +1436,18 @@ static int es8311_processbegin(FAR struct es8311_dev_s *priv)
       timeout = MSEC2TICK(((uint32_t)(apb->nbytes - apb->curbyte) << 14) /
                           (uint32_t)priv->samprate / (uint32_t)priv->bpsamp);
 
-      if (priv->audio_mode == ES_MODULE_DAC)
+      if (priv->audio_mode == ES_MODULE_DAC && apb->curbyte >= apb->nbytes)
+        {
+          /* Nothing to send: players end a stream whose length is a
+           * multiple of the buffer size with an empty final buffer, and
+           * an empty transfer may never complete, which would keep the
+           * worker from ever stopping.  Complete it here.
+           */
+
+          es8311_processdone(priv->i2s, apb, priv, OK);
+          ret = OK;
+        }
+      else if (priv->audio_mode == ES_MODULE_DAC)
         {
           ret = I2S_SEND(priv->i2s, apb, es8311_processdone,
                          priv, timeout);
@@ -1375,7 +1460,15 @@ static int es8311_processbegin(FAR struct es8311_dev_s *priv)
 
       if (ret < 0)
         {
+          /* Give the buffer back rather than lose it: counted in flight
+           * but never completed, it kept the worker, and so es8311_stop(),
+           * waiting forever.  I2S fails like this when it cannot allocate
+           * the internal buffer the DMA needs.
+           */
+
           auderr("I2S transfer failed: %d\n", ret);
+          apb->nbytes = 0;   /* Nothing was transferred */
+          es8311_processdone(priv->i2s, apb, priv, ret);
           break;
         }
     }
@@ -2198,10 +2291,23 @@ static void es8311_reset(FAR struct es8311_dev_s *priv)
   regconfig &= ~(0x20);
   es8311_writereg(priv, ES8311_CLK_MANAGER_REG06, regconfig);
   es8311_writereg(priv, ES8311_SYSTEM_REG13, 0x10);
-  es8311_writereg(priv, ES8311_ADC_REG1B, 0x0a);
-  es8311_writereg(priv, ES8311_ADC_REG1C, 0x6a);
+  es8311_writereg(priv, ES8311_ADC_REG1B, CONFIG_ES8311_ADC_HPF);
+  es8311_writereg(priv, ES8311_ADC_REG1C, 0x60 | CONFIG_ES8311_ADC_HPF);
   es8311_setvolume(priv, ES_MODULE_ADC, CONFIG_ES8311_INPUT_INITVOLUME);
   es8311_setvolume(priv, ES_MODULE_DAC, CONFIG_ES8311_OUTPUT_INITVOLUME);
+  es8311_setmicgain(priv, CONFIG_ES8311_MIC_GAIN);
+
+  /* Leave the analog side powered down until es8311_start: the software
+   * reset does not do it, and a stream that ends by itself never reaches
+   * es8311_stop.  A powered codec (VMID, PGA, ADC, DAC) costs about 20 mA.
+   */
+
+  es8311_writereg(priv, ES8311_SYSTEM_REG0E, 0xff);
+  es8311_writereg(priv, ES8311_SYSTEM_REG12, 0x02);
+  es8311_writereg(priv, ES8311_SYSTEM_REG14, 0x00);
+  es8311_writereg(priv, ES8311_SYSTEM_REG0D, 0xfc);
+  es8311_writereg(priv, ES8311_ADC_REG15,    0x00);
+  es8311_writereg(priv, ES8311_DAC_REG37,    0x08);
 
   es8311_dump_registers(&priv->dev, "After reset");
   audinfo("ES8311 reset complete.\n");
