@@ -1151,9 +1151,10 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
               break;
             }
 
-          /* Tell the I2S how many slots the stream has: a mono stream is the
-           * left one, the ADC (the right one carries the ADC too, or the DAC
-           * as an echo reference, see ES8311_GPIO_REG44)
+          /* Tell the I2S how many slots the stream has.  A mono stream
+           * takes the left slot, which carries the ADC; es8311_start()
+           * puts the DAC on the right one, as an echo reference
+           * (ADCDAT_SEL in ES8311_GPIO_REG44).
            */
 
           ret = I2S_RXCHANNELS(priv->i2s, caps->ac_channels);
