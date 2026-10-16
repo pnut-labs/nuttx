@@ -202,6 +202,19 @@ int esp32s3_bringup(void)
                      ret);
             }
 #    endif
+
+#    ifdef CONFIG_FF_DRV2605
+          /* The vibration motor, as /dev/input_ff0: the XL9555 has powered
+           * its driver
+           */
+
+          ret = tdeck_haptic_initialize();
+          if (ret < 0)
+            {
+              syslog(LOG_ERR, "ERROR: Failed to initialize the motor: %d\n",
+                     ret);
+            }
+#    endif
         }
 #  endif
     }

@@ -198,5 +198,21 @@ int tdeck_gnss_initialize(void);
 int tdeck_audio_initialize(void);
 #endif
 
+/****************************************************************************
+ * Name: tdeck_haptic_initialize
+ *
+ * Description:
+ *   Register the DRV2605L behind the vibration motor as /dev/input_ff0.
+ *   The XL9555 powers it, so this runs after the XL9555 is set up.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_FF_DRV2605) && defined(CONFIG_IOEXPANDER_PCA9555)
+int tdeck_haptic_initialize(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_XTENSA_ESP32S3_LILYGO_TDECK_MAX_SRC_LILYGO_TDECK_MAX_H */

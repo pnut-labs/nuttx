@@ -57,7 +57,9 @@ The port is being written part by part.  Supported so far:
   command (``full``);
 * the modem on UART2, and the ``modem`` command (``full``);
 * the audio codec as ``/dev/audio/pcm0`` and ``/dev/audio/pcm_in0``, with
-  ``nxplayer`` and ``nxrecorder`` (``full``).
+  ``nxplayer`` and ``nxrecorder`` (``full``);
+* the vibration motor as ``/dev/input_ff0``, and the ``haptic`` command
+  (``full``).
 
 Serial Console
 ==============
@@ -495,6 +497,33 @@ parse WAV headers: WAV files do not play.  ``nxplayer`` and
   detached at start-up: the I2S output's DMA got the same CPU interrupt,
   and UART0's interrupt, which nothing cleared, never stopped.
 
+Vibration motor
+===============
+
+The vibration motor is an ERM driven by a DRV2605L at I2C address 0x5a.
+The chip's supply is the XL9555's ``motor_en`` line, on from the start.  The
+driver is ``drivers/input/drv2605.c`` (``FF_DRV2605``), and ``full``
+registers it as the force feedback device ``/dev/input_ff0``, with the
+``haptic`` command to play it::
+
+    nsh> haptic                  # 200 ms at full strength
+    nsh> haptic buzz 500 40      # 500 ms at 40 %
+    nsh> haptic effect 1 7 10    # strong click, soft bump, double click
+
+* The driver runs the motor in open loop with the chip's ERM library 1, as
+  the vendor's firmware does, and puts the chip in standby between effects.
+  Full strength is the chip's default overdrive clamp, about 3 V, as in the
+  vendor's firmware.
+* ``FF_CONSTANT`` and ``FF_RUMBLE`` effects run the motor at a level for the
+  effect's length; ``FF_PERIODIC`` effects with the ``FF_CUSTOM`` waveform
+  play up to eight of the chip's 123 built-in effects, whose numbers go in
+  ``custom_data``.  ``FF_GAIN`` scales the level.
+* Effects uploaded to a force feedback device outlive the file they were
+  uploaded through, and only that file may erase them: a program that exits
+  without ``EVIOCRMFF`` leaves its slot in use for good.  ``haptic`` waits
+  for its effect to end, with the driver's ``DRV2605IOC_BUSY`` ioctl, and
+  erases it.
+
 Configurations
 ==============
 
@@ -524,7 +553,8 @@ fuel gauge (``/dev/batt0``), the charger (``/dev/charger0``),
 GNSS receiver (``/dev/ttyGNSS0`` and its uORB topics, the ``gps``
 command), the modem (``/dev/ttyS1``, the ``modem`` command), the audio
 codec (``/dev/audio/pcm0``, ``/dev/audio/pcm_in0``, ``nxplayer``,
-``nxrecorder``), and
+``nxrecorder``), the vibration motor (``/dev/input_ff0``, the ``haptic``
+command), and
 the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset

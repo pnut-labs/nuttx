@@ -58,6 +58,12 @@ ifeq ($(CONFIG_AUDIO_ES8311)$(CONFIG_ESPRESSIF_I2S0)$(CONFIG_IOEXPANDER_PCA9555)
 CSRCS += esp32s3_audio.c
 endif
 
+# The XL9555 powers the vibration motor's driver
+
+ifeq ($(CONFIG_FF_DRV2605)$(CONFIG_IOEXPANDER_PCA9555),yy)
+CSRCS += esp32s3_haptic.c
+endif
+
 ifneq ($(CONFIG_BQ27220)$(CONFIG_SY6970),)
 CSRCS += esp32s3_battery.c
 endif
