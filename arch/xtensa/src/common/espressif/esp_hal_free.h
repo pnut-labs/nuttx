@@ -21,7 +21,11 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Force-included into the Espressif HAL's component sources (hal.mk).
+ * Force-included into the Espressif HAL's components/ sources that are
+ * built by their path (the rule is in common/espressif/Make.defs).  The
+ * sources Wireless.mk builds by bare name through VPATH (mbedtls, the
+ * supplicant) are not covered, and do not need it: mbedtls frees through
+ * esp_mbedtls_mem_free(), the supplicant through kmm_free().
  *
  * The HAL releases memory it got from heap_caps_malloc() and friends with
  * plain free(), as ESP-IDF's single heap allows.  NuttX's heap_caps_malloc()
