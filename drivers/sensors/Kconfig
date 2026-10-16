@@ -283,6 +283,18 @@ config SENSORS_BMG160
 	---help---
 		Enable driver support for the Bosch BMG160 gyroscope sensor.
 
+config SENSORS_BHI260AP
+	bool "Bosch BHI260AP smart sensor hub support"
+	default n
+	select I2C
+	select SCHED_HPWORK
+	---help---
+		Enable driver support for the Bosch BHI260AP smart sensor hub
+		(accelerometer, gyroscope and a microcontroller), over I2C, as the
+		uORB topics sensor_accel and sensor_gyro.  The chip runs a firmware
+		image that the board has to supply; it is uploaded when a sensor is
+		first activated.
+
 config SENSORS_BMI160
 	bool "Bosch BMI160 Inertial Measurement Sensor support"
 	default n

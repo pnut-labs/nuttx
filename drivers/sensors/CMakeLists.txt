@@ -82,6 +82,10 @@ if(CONFIG_SENSORS)
 
   # These drivers can be used with sensor connected over SPI or I2C bus
 
+  if(CONFIG_SENSORS_BHI260AP)
+    list(APPEND SRCS bhi260ap.c)
+  endif()
+
   if(CONFIG_SENSORS_BMI270)
     list(APPEND SRCS bmi270_base.c)
     if(CONFIG_SENSORS_BMI270_UORB)
