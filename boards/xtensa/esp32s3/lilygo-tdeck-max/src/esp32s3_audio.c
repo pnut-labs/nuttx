@@ -29,8 +29,9 @@
  * connects the codec rather than the modem (low, from boot).  The
  * microphone is an analog electret on MIC1P/MIC1N, biased from ADCVREF.
  *
- * Playback is /dev/audio/pcm0, through NuttX's PCM decoder so that WAV
- * files play; recording is /dev/audio/pcm_in0.  Both are the same codec,
+ * Playback is /dev/audio/pcm0, through NuttX's PCM decoder (which in raw
+ * mode, AUDIO_FORMAT_RAW, passes raw PCM through and does not parse WAV
+ * headers); recording is /dev/audio/pcm_in0.  Both are the same codec,
  * set up twice: use one at a time.  The amplifier is switched on while the
  * output is reserved by a player.
  ****************************************************************************/
@@ -188,7 +189,7 @@ int tdeck_audio_initialize(void)
       return -ENODEV;
     }
 
-  /* Playback: codec, PCM decoder for WAV files, amplifier while reserved */
+  /* Playback: codec, PCM decoder, amplifier while reserved */
 
   codec = es8311_initialize(i2c, i2s, &g_es8311_out);
   pcm   = codec != NULL ? pcm_decode_initialize(codec) : NULL;

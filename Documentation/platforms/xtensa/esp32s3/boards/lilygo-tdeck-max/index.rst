@@ -443,11 +443,13 @@ Audio
 
 The ES8311 codec on I2S0 is registered with the ``es8311`` driver
 (``AUDIO_ES8311``) as ``/dev/audio/pcm0`` for playback, through the PCM
-decoder so that WAV files play, and ``/dev/audio/pcm_in0`` for recording
-from the microphone, an analog electret on the codec's MIC1 input, with
-30 dB of analog and 36 dB of digital gain (``ES8311_MIC_GAIN``).
-``nxplayer`` and ``nxrecorder`` drive them, for example with raw 16-bit mono
-files at 16 kHz on the microSD card::
+decoder, and ``/dev/audio/pcm_in0`` for recording from the microphone, an
+analog electret on the codec's MIC1 input, with 30 dB of analog and 36 dB
+of digital gain (``ES8311_MIC_GAIN``).  ``full`` puts the decoder in raw
+mode (``AUDIO_FORMAT_RAW``), so it passes raw PCM through and does not
+parse WAV headers: WAV files do not play.  ``nxplayer`` and
+``nxrecorder`` drive them, for example with raw 16-bit mono files at
+16 kHz on the microSD card::
 
     nsh> nxrecorder
     nxrecorder> device /dev/audio/pcm_in0
