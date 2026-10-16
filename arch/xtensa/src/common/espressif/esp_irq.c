@@ -51,6 +51,7 @@
 #include "esp_cpu.h"
 #include "esp_rom_sys.h"
 #include "rom/ets_sys.h"
+#include "soc/soc.h"
 
 #if defined(CONFIG_ARCH_CHIP_ESP32)
 #  include "hardware/esp32_soc.h"
@@ -199,18 +200,13 @@ uintptr_t g_cpu_intstack_top[CONFIG_SMP_NCPUS] =
 
 void esp_cpuint_initialize(void)
 {
-  uintptr_t regaddr;
-  int i;
-#ifdef CONFIG_SMP
   int cpu;
-#endif
+  int i;
 
-#ifdef CONFIG_SMP
   /* Which CPU are we initializing */
 
   cpu = this_cpu();
   DEBUGASSERT(cpu >= 0 && cpu < CONFIG_SMP_NCPUS);
-#endif
 
   /* Initialize the Xtensa interrupt handler table first.
    * This MUST be called before any interrupt can fire to ensure
@@ -222,6 +218,19 @@ void esp_cpuint_initialize(void)
   /* Disable all CPU interrupts on this CPU */
 
   xtensa_disable_all();
+
+  /* Detach every peripheral interrupt source from this CPU.  The ROM and
+   * the bootloader leave some attached (the ESP32-S3 ROM attaches UART0 to
+   * CPU interrupt 5), and a source still attached to a CPU interrupt that
+   * is later allocated to another peripheral raises it too: that
+   * peripheral's handler cannot clear it, so the interrupt never stops.
+   * ESP-IDF does the same at start-up.
+   */
+
+  for (i = 0; i < ETS_MAX_INTR_SOURCE; i++)
+    {
+      esp_rom_route_intr_matrix(cpu, i, ETS_INVALID_INUM);
+    }
 }
 
 #ifdef CONFIG_ESPRESSIF_IRAM_ISR_DEBUG
