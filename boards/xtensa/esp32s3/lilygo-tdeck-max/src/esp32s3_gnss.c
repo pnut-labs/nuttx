@@ -401,16 +401,29 @@ int tdeck_gnss_initialize(void)
 
   int ret;
 
+  /* The upper half first, so that no thread is left behind if registration
+   * fails.  Nothing can start the receiver before the thread exists, as
+   * bring-up runs before any task; a start would only leave run posted,
+   * for the thread to take when it runs.
+   */
+
+  ret = gnss_register(&g_gnss.lower, 0, nbuffer, SENSOR_GNSS_IDX_GNSS_MAX);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
   /* The thread, parked until the receiver is started */
 
   ret = kthread_create("gnss", GNSS_THREAD_PRIORITY, GNSS_THREAD_STACK,
                        tdeck_gnss_thread, NULL);
   if (ret < 0)
     {
+      gnss_unregister(&g_gnss.lower, 0);
       return ret;
     }
 
-  return gnss_register(&g_gnss.lower, 0, nbuffer, SENSOR_GNSS_IDX_GNSS_MAX);
+  return OK;
 }
 
 #endif /* CONFIG_SENSORS_GNSS */
