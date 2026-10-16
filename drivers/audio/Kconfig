@@ -217,6 +217,26 @@ config ES8311_OUTPUT_INITVOLUME
 	int "ES8311 initial output volume setting"
 	default 400
 
+config ES8311_MIC_GAIN
+	int "ES8311 initial microphone gain (dB)"
+	default 24
+	range 0 42
+	---help---
+		The ADC's digital gain, 0 to 42 dB in 6 dB steps, on top of the
+		analog PGA's 30 dB.  Recording applications can change it with the
+		AUDIO_FU_INP_GAIN feature.
+
+config ES8311_ADC_HPF
+	int "ES8311 ADC high-pass filter coefficient"
+	default 10
+	range 0 31
+	---help---
+		The coefficient of both stages of the ADC's high-pass filter
+		(ADC_HPFS1, ADC_HPFS2): the smaller, the higher the cutoff.  At
+		16 kHz, 10 removes little more than the DC offset, while 4
+		attenuates 50-100 Hz by about 14 dB and 200-500 Hz by about 3 dB,
+		which cuts rumble and supply noise without thinning speech much.
+
 choice
 	prompt "MCLK source"
 	default ES8311_SRC_MCLK
