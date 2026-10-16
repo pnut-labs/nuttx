@@ -64,6 +64,12 @@ ifeq ($(CONFIG_FF_DRV2605)$(CONFIG_IOEXPANDER_PCA9555),yy)
 CSRCS += esp32s3_haptic.c
 endif
 
+# Wi-Fi and Bluetooth LE, brought up when asked for
+
+ifeq ($(CONFIG_ESPRESSIF_WIRELESS),y)
+CSRCS += esp32s3_radios.c
+endif
+
 # The IMU runs Bosch's firmware image, which the build downloads from
 # Bosch's BHI2xy SensorAPI (BSD-3-Clause) at a fixed commit and checks
 # before esp32s3_imu_fw.S includes it

@@ -61,7 +61,9 @@ The port is being written part by part.  Supported so far:
 * the vibration motor as ``/dev/input_ff0``, and the ``haptic`` command
   (``full``);
 * the IMU's accelerometer and gyroscope as uORB topics, with the
-  ``sensortest`` command (``full``).
+  ``sensortest`` command (``full``);
+* 2.4 GHz Wi-Fi and Bluetooth LE, off until asked for, with the ``wapi``,
+  ``ping`` and ``bt`` commands (``full``).
 
 Serial Console
 ==============
@@ -483,11 +485,14 @@ parse WAV headers: WAV files do not play.  ``nxplayer`` and
   by about 30 dB below 20 Hz while costing speech about 3 dB at
   200-500 Hz.  The vibration motor is picked up too.
 * Every transfer goes through a buffer in internal RAM, where the DMA
-  works: the heap spans internal RAM and PSRAM, and a buffer that lands in
-  PSRAM is refused.  When no such buffer can be had, the transfer fails
-  and its audio buffer comes back empty, so a recording stops growing,
-  and ``stop`` still works.  Ten seconds recorded into ``/tmp`` lost
-  nothing.
+  works, from the kernel heap.  When no such buffer can be had, the
+  transfer fails and its audio buffer comes back empty, so a recording
+  stops growing, and ``stop`` still works.
+* Record to the microSD card, not to ``/tmp``.  In ``full`` the kernel
+  heap is internal RAM only (see Memory below), about 230 KB, and
+  ``/tmp`` is a tmpfs on it: a recording into ``/tmp`` stops after about
+  five seconds, when the heap runs out, and deleting the file gives the
+  memory back.
 * The ESP32-S3's I2S driver and the ES8311 driver needed fixes for this,
   found with earlier firmware for this board: receive clocks in
   full-duplex master mode, mono slot selection, a receiver that keeps
@@ -548,6 +553,56 @@ registers it as the force feedback device ``/dev/input_ff0``, with the
   for its effect to end, with the driver's ``DRV2605IOC_BUSY`` ioctl, and
   erases it.
 
+Wi-Fi and Bluetooth
+===================
+
+``full`` has the ESP32-S3's 2.4 GHz Wi-Fi station and Bluetooth LE, with
+their coexistence arbiter, but neither radio is brought up at boot:
+bringing one up costs a large part of the internal heap, and the network
+stack starts the Wi-Fi radio as soon as ``wlan0`` exists.  Each radio is a
+device that brings it up when 1 is written to it::
+
+    nsh> gpio -o 1 /dev/wifi_en
+    nsh> ifup wlan0
+    nsh> wapi scan wlan0
+    nsh> wapi psk wlan0 <passphrase> WPA_ALG_CCMP WPA_VER_2
+    nsh> wapi essid wlan0 <ssid> WAPI_ESSID_ON
+    nsh> renew wlan0
+
+    nsh> gpio -o 1 /dev/ble_en
+    nsh> ifup bnep0
+    nsh> bt bnep0 scan start
+    nsh> bt bnep0 scan get
+
+* Bringing a radio up is a one-way trip: its driver registers a network
+  device it has no way to remove.  Once up, Wi-Fi can still be stopped
+  and started with ``ifdown`` and ``ifup``.
+* ``LILYGO_TDECK_MAX_BOOT_WIFI`` and ``LILYGO_TDECK_MAX_BOOT_BLE`` bring a
+  radio up at boot instead; the build refuses them with an init thread
+  stack of less than 4 KB, as the radios' set-up overflowed 2 KB in a
+  silent reset loop.
+* The coexistence arbiter starts the timer service it needs before it
+  sets up its timers; until then its first timer could not be created.
+* With both radios up, about 118 KB of the kernel heap is left; with
+  Wi-Fi only, about 155 KB.
+* The ESP32-S3 radio is 2.4 GHz only: 5 GHz access points are invisible
+  to it.
+
+Memory
+======
+
+Wi-Fi rules out PSRAM in the kernel heap (``ESP32S3_SPIRAM_COMMON_HEAP``),
+so ``full`` has a separate user heap (``ESP32S3_SPIRAM_USER_HEAP``, which
+selects ``MM_KERNEL_HEAP``): ``free`` shows about 230 KB of internal RAM as
+``Kmem`` and the 8 MB of PSRAM as ``Umem``.  Drivers, DMA buffers, the
+network stack and tmpfs take from the kernel heap; programs from the user
+heap.  The Espressif HAL frees memory from ``heap_caps_malloc()``, which is
+in the kernel heap, with plain ``free()``: the build has ``free()`` in the
+HAL's components go back to the heap the memory came from.  The user heap
+also needs the low priority work queue (``SCHED_LPWORK``), which the
+Bluetooth stack selects here: a configuration without Bluetooth has to
+set it, or the PSRAM is left out of the heaps.
+
 Configurations
 ==============
 
@@ -579,7 +634,8 @@ command), the modem (``/dev/ttyS1``, the ``modem`` command), the audio
 codec (``/dev/audio/pcm0``, ``/dev/audio/pcm_in0``, ``nxplayer``,
 ``nxrecorder``), the vibration motor (``/dev/input_ff0``, the ``haptic``
 command), the IMU (the uORB topics ``sensor_accel0`` and ``sensor_gyro0``,
-the ``sensortest`` command), and
+the ``sensortest`` command), Wi-Fi and Bluetooth LE (``/dev/wifi_en``,
+``/dev/ble_en``, the ``wapi``, ``ping`` and ``bt`` commands), and
 the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset
