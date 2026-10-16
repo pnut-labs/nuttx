@@ -162,5 +162,23 @@ int tdeck_lora_sleep(void);
 int tdeck_lora_initialize(void);
 #endif
 
+/****************************************************************************
+ * Name: tdeck_gnss_initialize
+ *
+ * Description:
+ *   Register the MIA-M10Q GNSS receiver with NuttX's GNSS upper half: the
+ *   uORB topics sensor_gnss and sensor_gnss_satellite, and the raw NMEA
+ *   stream /dev/ttyGNSS0.  The receiver is powered while any of them is in
+ *   use.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_SENSORS_GNSS) && defined(CONFIG_IOEXPANDER_PCA9555)
+int tdeck_gnss_initialize(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_XTENSA_ESP32S3_LILYGO_TDECK_MAX_SRC_LILYGO_TDECK_MAX_H */

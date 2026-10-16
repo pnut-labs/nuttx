@@ -46,6 +46,12 @@ ifeq ($(CONFIG_ESP32S3_SPI2)$(CONFIG_LPWAN_SX126X),yy)
 CSRCS += esp32s3_lora.c
 endif
 
+# The GNSS receiver's rail is one of the XL9555's lines
+
+ifeq ($(CONFIG_SENSORS_GNSS)$(CONFIG_IOEXPANDER_PCA9555),yy)
+CSRCS += esp32s3_gnss.c
+endif
+
 ifneq ($(CONFIG_BQ27220)$(CONFIG_SY6970),)
 CSRCS += esp32s3_battery.c
 endif
