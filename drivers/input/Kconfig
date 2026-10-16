@@ -62,6 +62,16 @@ config AW86225_RTP_FILE_PATH
 
 endif # FF_AW86225
 
+config FF_DRV2605
+	bool "Enable DRV2605 haptic driver"
+	default n
+	select I2C
+	depends on SCHED_LPWORK
+	---help---
+		Enable the TI DRV2605 and DRV2605L haptic drivers, for an ERM
+		motor in open loop.  Plays the chip's built-in effect library and
+		timed vibrations at a set strength.
+
 endif # INPUT_FF
 
 config INPUT_MOUSE
