@@ -54,7 +54,8 @@ The port is being written part by part.  Supported so far:
   ``poweroff`` (``full``);
 * the LoRa radio as ``/dev/lora0``, and the ``lora`` command (``full``);
 * the GNSS receiver through NuttX's GNSS upper half, and the ``gps``
-  command (``full``).
+  command (``full``);
+* the modem on UART2, and the ``modem`` command (``full``).
 
 Serial Console
 ==============
@@ -385,6 +386,56 @@ clock from the fix.
 * Indoors, from a cold start, it reports satellites in view; a position
   fix has not been tried with a view of the sky yet.
 
+Modem
+=====
+
+The SIMCom A7682E (4G LTE Cat 1) is on UART2 at 115200 baud as
+``/dev/ttyS1``, and the ``modem`` command drives it::
+
+    nsh> modem on            # supply, PWRKEY, wait for the first answer
+    nsh> modem info          # identity, SIM, signal, network
+    nsh> modem at +CSQ       # any command, the AT prefix is optional
+    nsh> modem sms send <number> hello
+    nsh> modem sms list      # unread, or "list all"
+    nsh> modem term          # type at it yourself; Ctrl-] leaves
+    nsh> modem off
+
+* ``modem on`` switches the ``modem_pwr`` rail on, presses PWRKEY (high on
+  the XL9555 pulls the modem's PWRKEY low) for 100 ms, then sends ``AT``
+  once a second until the modem answers, about 7 s later; it turns the
+  command echo off and verbose errors on.  The supply alone does not start
+  the modem.
+* ``modem off`` shuts the modem down with ``AT+CPOF``, or with a 3 s
+  PWRKEY press if it does not answer, waits for it to stop answering, and
+  only then cuts its rail: about 6 s in all.  If it keeps running, the
+  rail is left on and the command fails.
+* The level shifter between the modem and the ESP32-S3 (RX, TX, RI and
+  DTR) is powered by the modem's own 1.8 V output, so while the modem is
+  off UART2 is silent.
+* The SIM and the microSD card share one holder and can both be fitted.
+  The modem has its own microphone; its speaker output and the codec's
+  share the speaker, chosen by ``audio_sel``.
+
+.. warning::
+
+   Do not cut ``modem_pwr`` while the modem is running: SIMCom warns that
+   it can damage the modem's flash.  Use ``modem off``.
+
+Found with earlier firmware for this board:
+
+* Without IMS, SMS need the modem attached to the circuit-switched domain
+  too (``AT+CEMODE=2``, kept across power cycles); with LTE for data only
+  and no IMS, sending fails with ``+CMS ERROR: Network timeout``.  The
+  modem refuses ``AT+CMGS`` with the UCS2 character set and GSM 7-bit
+  coding together, so the command sends the text as IRA.
+* Calls work over VoLTE where the operator offers it for the line (the
+  modem registers to IMS by itself, ``+CIREG: 1,1``).  Without VoLTE a
+  call falls back to GSM, and the modem switched itself off as it left
+  LTE, probably a brownout on the GSM transmit bursts.
+* Mobile data ran over PPP (NuttX's ``pppd``, on a 3GPP 27.010 channel of
+  the modem's link); the operator's path dropped packets over 1480 bytes,
+  so the TUN MTU wants 1440.
+
 Configurations
 ==============
 
@@ -412,7 +463,7 @@ keyboard (``/dev/kbd0``, the ``kbd`` command), the touch screen
 fuel gauge (``/dev/batt0``), the charger (``/dev/charger0``),
 ``poweroff``, the LoRa radio (``/dev/lora0``, the ``lora`` command), the
 GNSS receiver (``/dev/ttyGNSS0`` and its uORB topics, the ``gps``
-command), and
+command), the modem (``/dev/ttyS1``, the ``modem`` command), and
 the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset
