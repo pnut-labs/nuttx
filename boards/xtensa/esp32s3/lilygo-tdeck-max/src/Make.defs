@@ -42,6 +42,10 @@ ifeq ($(CONFIG_INPUT_TCA8418),y)
 CSRCS += esp32s3_tca8418.c
 endif
 
+ifeq ($(CONFIG_ESP32S3_SPI2)$(CONFIG_LPWAN_SX126X),yy)
+CSRCS += esp32s3_lora.c
+endif
+
 ifneq ($(CONFIG_BQ27220)$(CONFIG_SY6970),)
 CSRCS += esp32s3_battery.c
 endif
