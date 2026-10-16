@@ -80,6 +80,10 @@ endif
 
 # These drivers can be used with sensor connected over SPI or I2C bus
 
+ifeq ($(CONFIG_SENSORS_BHI260AP),y)
+  CSRCS += bhi260ap.c
+endif
+
 ifeq ($(CONFIG_SENSORS_BMI160),y)
   CSRCS += bmi160_base.c
 ifeq ($(CONFIG_SENSORS_BMI160_UORB),y)
