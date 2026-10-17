@@ -1905,6 +1905,20 @@ config ESP32S3_TICKLESS
 	select ARCH_HAVE_TICKLESS
 	select SCHED_TICKLESS
 
+config ESP32S3_PM_CPU_POWER_DOWN
+	bool "Power the CPU down in light sleep"
+	default n
+	depends on PM && !SMP && !ESP32S3_SPIRAM_COMMON_HEAP
+	---help---
+		Power the CPU and its caches down during light sleep (PM_STANDBY).
+		The RTC controller saves their state into internal RAM before the
+		sleep and restores it after, so the software does not notice.
+		Espressif quotes about 650 uA less in light sleep on the ESP32-S3,
+		for 13 to 18 KB of the kernel heap, depending on the caches' sizes.
+		The controller reaches that memory by DMA, so it must be internal
+		RAM: not with the PSRAM in the kernel heap.  Both cores share the
+		CPU's power domain, so not with SMP either.
+
 config ESP32S3_PM_STANDBY_MIN_US
 	int "Shortest PM_STANDBY (microseconds)"
 	default 20000
