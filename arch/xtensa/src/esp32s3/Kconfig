@@ -1857,6 +1857,17 @@ config ESP32S3_TICKLESS
 	select ARCH_HAVE_TICKLESS
 	select SCHED_TICKLESS
 
+config ESP32S3_PM_STANDBY_MIN_US
+	int "Shortest PM_STANDBY (microseconds)"
+	default 20000
+	range 1000 60000000
+	depends on PM && SCHED_TICKLESS
+	---help---
+		With the tickless scheduler, PM_STANDBY light-sleeps until the
+		scheduler's next timer or the next esp_timer alarm, whichever comes
+		first.  When that is closer than this, the chip stays idle instead:
+		going to sleep and waking up again take time and power.
+
 config ESP32S3_SPIFLASH
 	bool "SPI Flash MTD Partition"
 	select ESPRESSIF_SPIFLASH if !ESP32S3_PARTITION_TABLE && !ESP32S3_SPIRAM

@@ -751,9 +751,29 @@ void esp_pmstandby(uint64_t time_in_us)
 {
   uint64_t rtc_diff_us;
   esp_sleep_wakeup_cause_t cause;
+#ifdef CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND
+  static bool pins_kept;
+#endif
 #ifdef CONFIG_PM_GPIO_WAKEUP
   int64_t gpio_mask;
 #endif
+
+#ifdef CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND
+  /* At start-up the HAL isolates every pin during light sleep: a
+   * workaround for input-only pins left floating, which a static pulse can
+   * make reset the chip on wake-up.  The drivers expect the pins they
+   * configured to keep their state, outputs above all, so leave every pin
+   * as it is configured.  A board then must not leave input-only pins
+   * floating.
+   */
+
+  if (!pins_kept)
+    {
+      esp_sleep_enable_gpio_switch(false);
+      pins_kept = true;
+    }
+#endif
+
 #ifdef CONFIG_PM_EXT0_WAKEUP
   esp_pm_ext0_wakeup_prepare();
 #endif

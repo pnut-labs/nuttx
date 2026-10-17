@@ -64,6 +64,7 @@
 #include "hardware/esp32s3_systimer.h"
 #include "hardware/esp32s3_system.h"
 #include "hardware/esp32s3_soc.h"
+#include "esp32s3_tickless.h"
 
 #ifdef CONFIG_SCHED_TICKLESS
 
@@ -74,6 +75,10 @@
 #define ESP32S3_SYSTIMER_TICKS_PER_SEC  (16 * 1000 * 1000)
 
 #define CTICK_PER_SEC         (ESP32S3_SYSTIMER_TICKS_PER_SEC)
+
+/* The shortest alarm: longer than setting it takes (2 us) */
+
+#define TICKLESS_MIN_CTICKS   (2 * CTICK_PER_SEC / 1000000)
 #define CTICK_PER_USEC        (CTICK_PER_SEC / USEC_PER_SEC)
 
 #define SEC_2_CTICK(s)        ((uint64_t)(s) * CTICK_PER_SEC)
@@ -192,7 +197,14 @@ static inline uint64_t tickless_getalarmvalue(void)
 
 static void IRAM_ATTR tickless_setcounter(uint64_t ticks)
 {
-  uint64_t alarm_ticks = tickless_getcounter() + ticks;
+  uint64_t alarm_ticks;
+
+  /* Clear an old alarm before setting the new one: cleared afterwards, an
+   * alarm that fired in between would be lost.
+   */
+
+  modifyreg32(SYSTIMER_INT_ENA_REG, SYSTIMER_TARGET0_INT_ENA, 0);
+  modifyreg32(SYSTIMER_INT_CLR_REG, 0, SYSTIMER_TARGET0_INT_CLR);
 
   /* Select unit0 to comp0 */
 
@@ -202,22 +214,39 @@ static void IRAM_ATTR tickless_setcounter(uint64_t ticks)
 
   modifyreg32(SYSTIMER_TARGET0_CONF_REG, SYSTIMER_TARGET0_PERIOD_MODE, 0);
 
-  /* Set alarm value */
+  /* Set the alarm value.  A target the counter had already reached when
+   * it was loaded (a timer already due: ticks 0) was seen never to fire on
+   * this chip, hanging every timed wait of the system, although the
+   * ESP32-S3 is meant to raise a missed target at once.  Keep the target
+   * ahead of the counter, and check after loading it.
+   */
 
-  putreg32(alarm_ticks & 0xffffffff, SYSTIMER_TARGET0_LO_REG);
-  putreg32((alarm_ticks >> 32) & 0xfffff, SYSTIMER_TARGET0_HI_REG);
+  alarm_ticks = tickless_getcounter() +
+                (ticks > TICKLESS_MIN_CTICKS ? ticks : TICKLESS_MIN_CTICKS);
+  for (; ; )
+    {
+      putreg32(alarm_ticks & 0xffffffff, SYSTIMER_TARGET0_LO_REG);
+      putreg32((alarm_ticks >> 32) & 0xfffff, SYSTIMER_TARGET0_HI_REG);
 
-  /* Apply alarm value */
+      /* Apply alarm value */
 
-  putreg32(SYSTIMER_TIMER_COMP0_LOAD, SYSTIMER_COMP0_LOAD_REG);
+      putreg32(SYSTIMER_TIMER_COMP0_LOAD, SYSTIMER_COMP0_LOAD_REG);
 
-  /* Enable alarm */
+      /* Enable alarm */
 
-  modifyreg32(SYSTIMER_CONF_REG, 0, SYSTIMER_TARGET0_WORK_EN);
+      modifyreg32(SYSTIMER_CONF_REG, 0, SYSTIMER_TARGET0_WORK_EN);
 
-  /* Enable interrupt */
+      if (tickless_getcounter() < alarm_ticks ||
+          (getreg32(SYSTIMER_INT_RAW_REG) & SYSTIMER_TARGET0_INT_RAW) != 0)
+        {
+          break;
+        }
 
-  modifyreg32(SYSTIMER_INT_CLR_REG, 0, SYSTIMER_TARGET0_INT_CLR);
+      alarm_ticks = tickless_getcounter() + TICKLESS_MIN_CTICKS;
+    }
+
+  /* Enable interrupt (level: a raised alarm interrupts at once) */
+
   modifyreg32(SYSTIMER_INT_ENA_REG, 0, SYSTIMER_TARGET0_INT_ENA);
 }
 
@@ -440,6 +469,62 @@ int IRAM_ATTR up_timer_start(const struct timespec *ts)
   leave_critical_section(flags);
 
   return OK;
+}
+
+/****************************************************************************
+ * Name: esp32s3_tickless_next
+ *
+ * Description:
+ *   See esp32s3_tickless.h.
+ *
+ ****************************************************************************/
+
+uint64_t IRAM_ATTR esp32s3_tickless_next(void)
+{
+  irqstate_t flags;
+  uint64_t counter;
+  uint64_t alarm;
+
+  flags = enter_critical_section();
+
+  if (!g_timer_started)
+    {
+      leave_critical_section(flags);
+      return UINT64_MAX;
+    }
+
+  counter = tickless_getcounter();
+  alarm   = tickless_getalarmvalue();
+
+  leave_critical_section(flags);
+
+  return alarm > counter ? CTICK_2_USEC(alarm - counter) : 0;
+}
+
+/****************************************************************************
+ * Name: esp32s3_tickless_resync
+ *
+ * Description:
+ *   Make sure the interval timer still fires after the counter jumped
+ *   forward (a light sleep corrects it by the time slept): an alarm the
+ *   counter passed without reaching it is set again, to fire at once.
+ *
+ ****************************************************************************/
+
+void IRAM_ATTR esp32s3_tickless_resync(void)
+{
+  irqstate_t flags;
+
+  flags = enter_critical_section();
+
+  if (g_timer_started &&
+      tickless_getcounter() >= tickless_getalarmvalue() &&
+      (getreg32(SYSTIMER_INT_RAW_REG) & SYSTIMER_TARGET0_INT_RAW) == 0)
+    {
+      tickless_setcounter(0);
+    }
+
+  leave_critical_section(flags);
 }
 
 /****************************************************************************

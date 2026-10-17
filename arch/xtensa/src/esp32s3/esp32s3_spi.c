@@ -41,6 +41,9 @@
 #include <nuttx/clock.h>
 #include <nuttx/mutex.h>
 #include <nuttx/spi/spi.h>
+#ifdef CONFIG_PM
+#  include <nuttx/power/pm.h>
+#endif
 
 #include <arch/board/board.h>
 
@@ -63,6 +66,21 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+/* A DMA transfer stops while the chip is in light sleep, and its
+ * completion interrupt does not wake the chip up: every transfer would wait
+ * for the next timer, the transfer timeout at the latest.  PM_IDLE is the
+ * lightest stay that keeps the domain out of PM_STANDBY and PM_SLEEP
+ * without blocking plain WFI idle, as the I2C driver does.
+ */
+
+#ifdef CONFIG_PM
+#  define spi_pm_stay()  pm_stay(PM_IDLE_DOMAIN, PM_IDLE)
+#  define spi_pm_relax() pm_relax(PM_IDLE_DOMAIN, PM_IDLE)
+#else
+#  define spi_pm_stay()
+#  define spi_pm_relax()
+#endif
 
 /* Check if Chip-Select pin will be controlled via software */
 
@@ -896,6 +914,8 @@ static void esp32s3_spi_dma_exchange(struct esp32s3_spi_priv_s *priv,
       memset(tp, 0, bytes);
     }
 
+  spi_pm_stay();
+
   esp32s3_spi_set_regbits(SPI_DMA_INT_CLR_REG(priv->config->id),
                           SPI_TRANS_DONE_INT_CLR_M);
 
@@ -978,6 +998,8 @@ static void esp32s3_spi_dma_exchange(struct esp32s3_spi_priv_s *priv,
 
   esp32s3_spi_clr_regbits(SPI_DMA_INT_ENA_REG(priv->config->id),
                           SPI_TRANS_DONE_INT_ENA_M);
+
+  spi_pm_relax();
 }
 #endif
 
