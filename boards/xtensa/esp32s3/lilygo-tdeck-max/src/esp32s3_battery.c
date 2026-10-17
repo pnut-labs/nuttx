@@ -59,6 +59,9 @@
 #  include <nuttx/power/pm.h>
 #  include <nuttx/wqueue.h>
 #  define TDECK_USB_POLL 1
+#  ifdef CONFIG_ESP32S3_USBSERIAL
+#    include "esp32s3_usbserial.h"
+#  endif
 #endif
 
 #include "lilygo-tdeck-max.h"
@@ -101,6 +104,7 @@ static FAR struct battery_charger_dev_s *g_charger;
 static struct work_s g_usb_work;
 PM_WAKELOCK_DECLARE_STATIC(g_usb_wakelock, "usb", PM_IDLE_DOMAIN, PM_IDLE);
 static bool g_usb_held;
+static bool g_usb_known;
 #endif
 
 /****************************************************************************
@@ -139,38 +143,46 @@ static int tdeck_gauge_initialize(FAR struct i2c_master_s *i2c)
  *
  * Description:
  *   Keep the chip out of light sleep while there is USB power, so that the
- *   USB console answers: in light sleep it does not.  The charger reports
- *   USB power as its "power good" status.
+ *   USB console answers: in light sleep it does not.  Without USB power,
+ *   disconnect the USB Serial/JTAG port, as if the cable had been pulled.
+ *   The charger reports USB power as its "power good" status; a failed
+ *   read changes nothing.
  *
  ****************************************************************************/
 
 #ifdef TDECK_USB_POLL
 static void tdeck_usb_poll(FAR void *arg)
 {
-  bool online = g_usb_held;
+  bool online;
+  int ret;
 
-  if (nxmutex_lock(&g_charger->batlock) >= 0)
+  ret = nxmutex_lock(&g_charger->batlock);
+  if (ret >= 0)
     {
-      if (g_charger->ops->online(g_charger, &online) < 0)
-        {
-          online = g_usb_held;
-        }
-
+      ret = g_charger->ops->online(g_charger, &online);
       nxmutex_unlock(&g_charger->batlock);
     }
 
-  if (online != g_usb_held)
+  if (ret >= 0 && (online != g_usb_held || !g_usb_known))
     {
-      if (online)
+      if (online != g_usb_held)
         {
-          pm_wakelock_stay(&g_usb_wakelock);
-        }
-      else
-        {
-          pm_wakelock_relax(&g_usb_wakelock);
+          if (online)
+            {
+              pm_wakelock_stay(&g_usb_wakelock);
+            }
+          else
+            {
+              pm_wakelock_relax(&g_usb_wakelock);
+            }
+
+          g_usb_held = online;
         }
 
-      g_usb_held = online;
+#ifdef CONFIG_ESP32S3_USBSERIAL
+      esp32s3_usbserial_connect(online);
+#endif
+      g_usb_known = true;
     }
 
   work_queue(TDECK_USB_WORK, &g_usb_work, tdeck_usb_poll, NULL,

@@ -25,6 +25,8 @@
  * Included Files
  ****************************************************************************/
 
+#include <stdbool.h>
+
 #include <nuttx/serial/serial.h>
 
 /****************************************************************************
@@ -47,5 +49,19 @@ extern uart_dev_t g_uart_usbserial;
  ****************************************************************************/
 
 void esp32s3_usbserial_write(char ch);
+
+/****************************************************************************
+ * Name: esp32s3_usbserial_connect
+ *
+ * Description:
+ *   Connect the USB Serial/JTAG controller to the USB pins, or disconnect
+ *   it as if the cable had been pulled: the host sees the device go, and
+ *   enumerates it afresh once it is connected again.  A board that runs on
+ *   a battery can disconnect it while there is no USB power, which spares
+ *   the pins' pull-up and transceiver.
+ *
+ ****************************************************************************/
+
+void esp32s3_usbserial_connect(bool connect);
 
 #endif /* __ARCH_XTENSA_SRC_ESP32S3_ESP32S3_USBSERIAL_H */
