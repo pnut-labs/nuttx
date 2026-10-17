@@ -48,6 +48,14 @@
 
 #define ES8311_RESET_REG00              0x00  /* Reset digital, csm, clock manager etc. */
 
+/* ES8311_RESET_REG00 values: running as a slave (the state machine on, no
+ * block held in reset), and idle (the state machine off and every digital
+ * block held in reset; the other registers keep their values)
+ */
+
+#define ES8311_REG00_RUN                0x80
+#define ES8311_REG00_IDLE               0x1f
+
 /* Clock Scheme Register definition */
 
 #define ES8311_CLK_MANAGER_REG01        0x01 /* Select CLK src for MCLK, enable clock for codec */

@@ -357,6 +357,15 @@ noinstrument_function void noreturn_function IRAM_ATTR __esp32s3_start(void)
 
   esp32s3_wdt_early_deinit();
 
+  /* Set up the RTC and the power related hardware, as the ESP32 and the
+   * RISC-V Espressif chips do.  Among other things this loads the chip's
+   * calibrated core voltages from eFuse: without them the HAL applies
+   * conservative defaults, higher than the chip needs.  It has to come
+   * before the flash is set up and the CPU frequency is set.
+   */
+
+  esp_rtc_init();
+
   esp_flash_app_init();
 
   /* Initialize RTC controller and set CPU frequency */
