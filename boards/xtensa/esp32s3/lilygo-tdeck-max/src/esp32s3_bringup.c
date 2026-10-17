@@ -268,11 +268,21 @@ int esp32s3_bringup(void)
 #ifdef CONFIG_ESPRESSIF_LEDC
   /* The front light and the keyboard's backlight, as /dev/pwm0 */
 
+#  ifdef CONFIG_PM
+  ret = tdeck_lights_initialize();
+#  else
   ret = esp32s3_pwm_setup();
+#  endif
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to set up the lights: %d\n", ret);
     }
+#endif
+
+#ifdef CONFIG_PM
+  /* Light sleep, now that every device is up */
+
+  tdeck_power_initialize();
 #endif
 
   UNUSED(ret);

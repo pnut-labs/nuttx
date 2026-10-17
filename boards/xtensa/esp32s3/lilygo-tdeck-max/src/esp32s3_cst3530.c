@@ -135,6 +135,8 @@ static void tdeck_touch_enable(FAR const struct cst3530_config_s *config,
     {
       esp_gpioirqdisable(BOARD_TOUCH_INT);
     }
+
+  tdeck_power_wake(BOARD_TOUCH_INT, false, enable);
 }
 
 /****************************************************************************

@@ -269,5 +269,52 @@ int tdeck_wifi_enable(void);
 int tdeck_ble_enable(void);
 #endif
 
+/****************************************************************************
+ * Name: tdeck_power_initialize
+ *
+ * Description:
+ *   Register /dev/awake, which keeps the chip out of light sleep while it
+ *   is open, and allow light sleep: called once the board is up.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_PM
+void tdeck_power_initialize(void);
+#endif
+
+/****************************************************************************
+ * Name: tdeck_power_wake
+ *
+ * Description:
+ *   Make a GPIO wake the chip from light sleep while it is at the level
+ *   given (high or low), or no longer.  For the drivers' interrupt enable
+ *   hooks: a call from an interrupt handler, a driver masking its
+ *   interrupt until its worker has run, leaves the pin waking the chip.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_PM
+void tdeck_power_wake(int pin, bool high, bool enable);
+#else
+#  define tdeck_power_wake(pin, high, enable)
+#endif
+
+/****************************************************************************
+ * Name: tdeck_lights_initialize
+ *
+ * Description:
+ *   Register the front light and the keyboard's backlight as /dev/pwm0,
+ *   keeping the chip out of light sleep while one of them is on: the LED
+ *   controller stops in light sleep.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_PM) && defined(CONFIG_ESPRESSIF_LEDC)
+int tdeck_lights_initialize(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_XTENSA_ESP32S3_LILYGO_TDECK_MAX_SRC_LILYGO_TDECK_MAX_H */

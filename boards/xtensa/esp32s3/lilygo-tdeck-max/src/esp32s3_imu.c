@@ -121,6 +121,8 @@ static void tdeck_imu_enable(FAR const struct bhi260ap_config_s *config,
     {
       esp_gpioirqdisable(BOARD_IMU_INT);
     }
+
+  tdeck_power_wake(BOARD_IMU_INT, true, enable);
 }
 
 /****************************************************************************
