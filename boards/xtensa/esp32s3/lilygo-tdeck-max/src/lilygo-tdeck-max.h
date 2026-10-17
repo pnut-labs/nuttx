@@ -270,6 +270,22 @@ int tdeck_ble_enable(void);
 #endif
 
 /****************************************************************************
+ * Name: board_spiflash_init
+ *
+ * Description:
+ *   Register the internal flash's system partition and mount its file
+ *   system (boards/xtensa/esp32s3/common/src/esp32s3_board_spiflash.c).
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_ESP32S3_SPIFLASH
+int board_spiflash_init(void);
+#endif
+
+/****************************************************************************
  * Name: tdeck_power_initialize
  *
  * Description:
