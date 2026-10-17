@@ -1533,6 +1533,10 @@ static int es8311_start(FAR struct audio_lowerhalf_s *dev)
       ret |= es8311_writereg(priv, ES8311_SDPIN_REG09,  dac_iface);
     }
 
+  /* Release the digital side, held in reset while idle (es8311_reset) */
+
+  ret |= es8311_writereg(priv, ES8311_RESET_REG00,  ES8311_REG00_RUN);
+
   ret |= es8311_writereg(priv, ES8311_ADC_REG17,    0xbf);
   ret |= es8311_writereg(priv, ES8311_SYSTEM_REG0E, 0x02);
   ret |= es8311_writereg(priv, ES8311_SYSTEM_REG12, 0x00);
@@ -2312,6 +2316,13 @@ static void es8311_reset(FAR struct es8311_dev_s *priv)
   es8311_writereg(priv, ES8311_SYSTEM_REG0D, 0xfc);
   es8311_writereg(priv, ES8311_ADC_REG15,    0x00);
   es8311_writereg(priv, ES8311_DAC_REG37,    0x08);
+
+  /* Hold the digital side in reset too, with the state machine off, until
+   * es8311_start: idle but running, the codec draws several mA even with
+   * no clock on its pins.  The configuration registers keep their values.
+   */
+
+  es8311_writereg(priv, ES8311_RESET_REG00, ES8311_REG00_IDLE);
 
   es8311_dump_registers(&priv->dev, "After reset");
   audinfo("ES8311 reset complete.\n");
