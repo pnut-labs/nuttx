@@ -682,13 +682,24 @@ redirected to a file (``sh /tmp/test.sh > /tmp/test.log &``): a script
 that writes to the console blocks once the console's buffers are full,
 and never reaches its restore, which leaves the board on its cell until
 it is switched off.  ``pmconfig stay idle`` in it measures the chip
-awake.  The gauge takes about 30 s to
-settle after a change.  Bluetooth leaves part of the radio powered after
-it has been up, about 16 mA, until the board is next powered off or Wi-Fi
-has been brought up and down (``ifup wlan0``, ``ifdown wlan0``).
+awake.  The gauge takes about 30 s to settle after a change.  Bluetooth
+leaves part of the radio powered after it has been up, about 16 mA,
+until the board is next powered off or Wi-Fi has been brought up and
+down (``ifup wlan0``, ``ifdown wlan0``).
 
 Measured that way with the radios off and nothing running (2026-10-17):
-64 mA awake and 12 mA in light sleep.
+43 mA awake and about 5 mA in light sleep, which is close to what the
+gauge resolves.  Along the way, each measured against the run before
+it (the baseline varies by a few mA from run to run):
+
+* the GNSS receiver's transmit line held low with its rail off: 25 mA;
+* the scheduler's timeslice timer stopped when only the idle task runs:
+  4 mA in light sleep, where it woke the chip after each time a task had
+  run;
+* the start code loading the chip's calibrated core voltages and RTC
+  settings (``esp_rtc_init()``): 14 mA awake;
+* the audio codec held in reset while no stream runs: about 3 mA in
+  light sleep, 4 mA awake.
 
 Configurations
 ==============
