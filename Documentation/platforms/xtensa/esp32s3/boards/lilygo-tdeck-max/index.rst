@@ -605,6 +605,36 @@ also needs the low priority work queue (``SCHED_LPWORK``), which the
 Bluetooth stack selects here: a configuration without Bluetooth has to
 set it, or the PSRAM is left out of the heaps.
 
+Internal flash
+==============
+
+The 16 MB flash is laid out as the project's design has it, with room
+for MCUboot and two firmware slots, although the firmware still starts
+without a bootloader, from 0x0:
+
+============ ======== ==================================================
+Offset       Size     What
+============ ======== ==================================================
+``0x000000`` 128 KB   MCUboot, later; today the firmware's start
+``0x020000`` 4 MB     the first firmware slot
+``0x420000`` 4 MB     the second firmware slot
+``0x820000`` 256 KB   MCUboot's scratch area
+``0x860000`` 64 KB    the device's own data (serial number, calibration)
+``0x870000`` 2 MB     the system partition: a littlefs at ``/var/lib``
+``0xa70000`` 5.5 MB   the package store
+============ ======== ==================================================
+
+* ``full`` mounts the system partition at ``/var/lib``
+  (``ESP32S3_STORAGE_MTD_OFFSET``, ``ESP32S3_STORAGE_MTD_SIZE``,
+  ``ESP32S3_SPIFLASH_LITTLEFS``, ``ESP32S3_SPIFLASH_MOUNTPT``), and
+  formats it the first time it cannot mount it.
+* littlefs keeps the longest name a volume takes (32 characters,
+  ``FS_LITTLEFS_NAME_MAX``) in the volume itself: a longer one needs the
+  partition formatted again.
+* The device data and the package store are not used yet.
+* Earlier firmware for this board kept littlefs volumes at 0x800000 and
+  0xf00000: the system partition overwrites part of the first.
+
 Power management
 ================
 

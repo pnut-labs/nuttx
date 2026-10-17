@@ -257,6 +257,19 @@ int esp32s3_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_ESP32S3_SPIFLASH
+  /* The internal flash's system partition, a littlefs mounted at
+   * ESP32S3_SPIFLASH_MOUNTPT (/var/lib in full) and formatted on first use
+   */
+
+  ret = board_spiflash_init();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to mount the system partition: %d\n",
+             ret);
+    }
+#endif
+
 #ifdef CONFIG_ESPRESSIF_WIRELESS
   /* Wi-Fi and Bluetooth LE, off until asked for (/dev/wifi_en,
    * /dev/ble_en)

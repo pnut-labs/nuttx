@@ -85,6 +85,14 @@ config ESP32S3_SPIFLASH_LITTLEFS
 
 endchoice # ESP32S3_SPIFLASH_FS
 
+config ESP32S3_SPIFLASH_MOUNTPT
+	string "Mount point of the SPI Flash MTD"
+	default "/data"
+	depends on ESP32S3_SPIFLASH_AUTO_BRINGUP
+	---help---
+		Where the file system on the SPI Flash MTD is mounted on board
+		bring-up.
+
 config ESP32S3_BOARD_I2C
 	bool
 	default y if ESP32S3_I2C0 || ESP32S3_I2C1
