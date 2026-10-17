@@ -85,6 +85,19 @@ void nxsched_switch_context(FAR struct tcb_s *from, FAR struct tcb_s *to)
     {
       nxsched_resume_roundrobin(to);
     }
+#  ifndef CONFIG_SMP
+  else if ((from->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_RR &&
+           (to->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_FIFO)
+    {
+      /* Nothing is time sliced any more: stop the timer that the task
+       * being switched out left running.  It would only expire for
+       * nothing, up to a timeslice later, and wake the CPU from idle after
+       * each time a round-robin task has run.
+       */
+
+      nxsched_timer_start(0, CLOCK_MAX);
+    }
+#  endif
 #endif
 
   /* Indicate that the task has been suspended */
