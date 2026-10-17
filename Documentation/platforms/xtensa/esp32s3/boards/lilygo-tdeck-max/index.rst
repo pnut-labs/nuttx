@@ -611,7 +611,9 @@ Power management
 ``full`` has NuttX's power management (``PM``, with the greedy governor)
 and the tickless scheduler.  Whenever nothing holds the chip awake, it
 light-sleeps (PM_STANDBY) until its next timer, at most ``PM_ALARM_SEC``
-(60 s), or until a wake-up pin.  While it is awake it scales the CPU's
+(60 s), or until a wake-up pin, with its CPU powered down
+(``ESP32S3_PM_CPU_POWER_DOWN``, which takes about 13 KB of the kernel
+heap with this board's caches).  While it is awake it scales the CPU's
 frequency (``ESP32S3_DFS``): 240 MHz whenever anything runs, 80 MHz while
 it waits for an interrupt.
 
@@ -684,10 +686,12 @@ redirected to a file (``sh /tmp/test.sh > /tmp/test.log &``): a script
 that writes to the console blocks once the console's buffers are full,
 and never reaches its restore, which leaves the board on its cell until
 it is switched off.  ``pmconfig stay idle`` in it measures the chip
-awake.  The gauge takes about 30 s to settle after a change.  Bluetooth
-leaves part of the radio powered after it has been up, about 16 mA,
-until the board is next powered off or Wi-Fi has been brought up and
-down (``ifup wlan0``, ``ifdown wlan0``).
+awake.  The gauge takes about 30 s to settle after a change.  A
+software restart (``reboot``) switches Bluetooth off first; after any
+other reset (over USB, by a watchdog, after a crash) part of the radio
+stays powered if Bluetooth was up, about 16 mA, until the board is next
+powered off or Wi-Fi has been brought up and down (``ifup wlan0``,
+``ifdown wlan0``).
 
 Measured that way with the radios off and nothing running (2026-10-17):
 27 mA awake, and in light sleep less than the gauge resolves (it reads

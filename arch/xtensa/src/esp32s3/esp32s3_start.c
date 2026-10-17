@@ -27,6 +27,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <debug.h>
+
 #include <nuttx/init.h>
 #include <nuttx/irq.h>
 
@@ -49,6 +51,10 @@
 #include "esp32s3_wdt.h"
 #include "esp32s3_dma.h"
 #include "esp32s3_dfs.h"
+
+#ifdef CONFIG_ESP32S3_PM_CPU_POWER_DOWN
+#  include "esp_private/sleep_cpu.h"
+#endif
 #ifdef CONFIG_BUILD_PROTECTED
 #  include "esp32s3_userspace.h"
 #endif
@@ -483,6 +489,22 @@ void weak_function xtensa_soc_initialize(void)
   /* The startup functions have initialized the HAL's power management */
 
   esp32s3_dfs_initialize();
+#endif
+
+#ifdef CONFIG_ESP32S3_PM_CPU_POWER_DOWN
+  /* The memory the RTC controller saves the CPU's and the caches' state
+   * into: light sleep powers the CPU down once it exists.  Frequency
+   * scaling's esp_pm_configure() frees it, so this comes after; another
+   * esp_pm_configure() with light_sleep_enable false would free it again.
+   * The result covers the CPU's memory only: the HAL goes on without the
+   * caches' if that allocation fails.
+   */
+
+  if (sleep_cpu_configure(true) != ESP_OK)
+    {
+      _err("ERROR: No memory to power the CPU down in light sleep\n");
+    }
+
 #endif
 }
 

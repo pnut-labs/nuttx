@@ -80,6 +80,7 @@
 #include "soc/clk_tree_defs.h"
 
 #include "esp32s3_ble_adapter.h"
+#include "esp32s3_systemreset.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -392,6 +393,7 @@ static IRAM_ATTR int32_t esp_queue_send_generic(void *queue,
                                                 int prio);
 static void esp_update_time(struct timespec *timespec, uint32_t ticks);
 static void IRAM_ATTR btdm_slp_tmr_callback(void *arg);
+static void bt_shutdown(void);
 static int IRAM_ATTR esp_int_adpt_cb(int irq, void *context, void *arg);
 static void IRAM_ATTR btdm_sleep_exit_phase0(void *param);
 #if CONFIG_MAC_BB_PD
@@ -2981,6 +2983,32 @@ static IRAM_ATTR void assert_wrapper(void)
 }
 
 /****************************************************************************
+ * Name: bt_shutdown
+ *
+ * Description:
+ *   Shutdown handler, run before a software restart.  The radio keeps
+ *   running through a restart, so a controller left enabled would keep
+ *   part of it powered in the restarted system, which knows nothing about
+ *   it, until the next power cycle: about 16 mA on a LilyGo T-Deck Max.
+ *   ESP-IDF disables the controller the same way.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static void bt_shutdown(void)
+{
+  if (g_btdm_controller_status == ESP_BT_CONTROLLER_STATUS_ENABLED)
+    {
+      esp32s3_bt_controller_disable();
+    }
+}
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -3313,6 +3341,19 @@ int esp32s3_bt_controller_enable(esp_bt_mode_t mode)
   coex_pti_v2();
 
   g_btdm_controller_status = ESP_BT_CONTROLLER_STATUS_ENABLED;
+
+  /* Disable the controller before a software restart (registered at the
+   * first enable; -EEXIST after that)
+   */
+
+  {
+    int err = esp32s3_register_shutdown_handler(bt_shutdown);
+
+    if (err < 0 && err != -EEXIST)
+      {
+        wlerr("Failed to register the shutdown handler: %d\n", err);
+      }
+  }
 
   return ret;
 
