@@ -611,7 +611,9 @@ Power management
 ``full`` has NuttX's power management (``PM``, with the greedy governor)
 and the tickless scheduler.  Whenever nothing holds the chip awake, it
 light-sleeps (PM_STANDBY) until its next timer, at most ``PM_ALARM_SEC``
-(60 s), or until a wake-up pin.
+(60 s), or until a wake-up pin.  While it is awake it scales the CPU's
+frequency (``ESP32S3_DFS``): 240 MHz whenever anything runs, 80 MHz while
+it waits for an interrupt.
 
 * Every state is held from the start (``PM_GOVERNOR_EXPLICIT_RELAX=-1``),
   and the end of the board's start releases PM_NORMAL and PM_IDLE.
@@ -688,9 +690,9 @@ until the board is next powered off or Wi-Fi has been brought up and
 down (``ifup wlan0``, ``ifdown wlan0``).
 
 Measured that way with the radios off and nothing running (2026-10-17):
-43 mA awake and about 5 mA in light sleep, which is close to what the
-gauge resolves.  Along the way, each measured against the run before
-it (the baseline varies by a few mA from run to run):
+27 mA awake, and in light sleep less than the gauge resolves (it reads
+0).  Along the way, each measured against the run before it (the
+baseline varies by a few mA from run to run):
 
 * the GNSS receiver's transmit line held low with its rail off: 25 mA;
 * the scheduler's timeslice timer stopped when only the idle task runs:
@@ -699,7 +701,8 @@ it (the baseline varies by a few mA from run to run):
 * the start code loading the chip's calibrated core voltages and RTC
   settings (``esp_rtc_init()``): 14 mA awake;
 * the audio codec held in reset while no stream runs: about 3 mA in
-  light sleep, 4 mA awake.
+  light sleep, 4 mA awake;
+* the CPU at 80 MHz while it waits for an interrupt: 16 mA awake.
 
 Configurations
 ==============
@@ -734,7 +737,8 @@ codec (``/dev/audio/pcm0``, ``/dev/audio/pcm_in0``, ``nxplayer``,
 command), the IMU (the uORB topics ``sensor_accel0`` and ``sensor_gyro0``,
 the ``sensortest`` command), Wi-Fi and Bluetooth LE (``/dev/wifi_en``,
 ``/dev/ble_en``, the ``wapi``, ``ping`` and ``bt`` commands), power
-management (light sleep, ``/proc/pm``, ``/dev/awake``, ``pmconfig``), and
+management (light sleep, frequency scaling, ``/proc/pm``, ``/dev/awake``,
+``pmconfig``), and
 the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset
