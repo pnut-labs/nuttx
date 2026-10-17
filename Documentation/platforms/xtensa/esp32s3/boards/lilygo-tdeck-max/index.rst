@@ -650,9 +650,17 @@ light-sleeps (PM_STANDBY) until its next timer, at most ``PM_ALARM_SEC``
 * A pin wakes the chip while its driver has the pin's interrupt enabled:
   the keyboard's, the touch screen's while ``/dev/input0`` is open, the
   LoRa radio's DIO1, and the IMU's.
-* The USB console does not wake the chip, and what is typed while it
-  sleeps is lost.  On USB power the chip stays awake, so this only shows
-  with the charger's input cut off.
+* Without USB power the USB Serial/JTAG port is disconnected, as if the
+  cable had been pulled, and connected again within 2 s of USB power
+  coming back.  The USB console could not wake the chip anyway.  Writes
+  to the console meanwhile block once its buffers are full, about 128
+  bytes, until USB power returns.
+* A line driven high into a chip whose rail is off feeds the chip
+  through its input protection.  The GNSS UART's transmit line (GPIO 16)
+  fed the unpowered receiver about 25 mA: while ``gps_en`` is off, the
+  line is taken off the UART and held low, and what is written to
+  ``/dev/ttyS0`` meanwhile is lost (``/dev/ttyGNSS0`` writes only while
+  the receiver is on).
 * During light sleep every pin keeps its configuration, outputs included,
   so inputs must not be left floating.
 * The clock gains about 0.85 % of the time slept: the sleep is timed by
@@ -668,10 +676,19 @@ mA (register 0x0c, negative while discharging), and restore it::
     nsh> i2c get -b 0 -a 0x55 -r 0x0c -w 16
     nsh> i2c set -b 0 -a 0x6a -r 0x00 -w 8 0x48
 
-The console is useless while the chip sleeps, so run such a test as a
-script in the background, with the restore in the same script.  The gauge
-takes about 30 s to settle after a change.  Bluetooth leaves part of the
-radio powered after it has been up, until the board is next powered off.
+Without USB power the console is gone, so run such a test as a script
+in the background, with the restore in the same script and its output
+redirected to a file (``sh /tmp/test.sh > /tmp/test.log &``): a script
+that writes to the console blocks once the console's buffers are full,
+and never reaches its restore, which leaves the board on its cell until
+it is switched off.  ``pmconfig stay idle`` in it measures the chip
+awake.  The gauge takes about 30 s to
+settle after a change.  Bluetooth leaves part of the radio powered after
+it has been up, about 16 mA, until the board is next powered off or Wi-Fi
+has been brought up and down (``ifup wlan0``, ``ifdown wlan0``).
+
+Measured that way with the radios off and nothing running (2026-10-17):
+64 mA awake and 12 mA in light sleep.
 
 Configurations
 ==============

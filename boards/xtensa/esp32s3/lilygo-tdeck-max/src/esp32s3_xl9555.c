@@ -42,6 +42,7 @@
 #include <arch/board/board.h>
 
 #include "espressif/esp_gpio.h"
+#include "hardware/esp32s3_gpio_sigmap.h"
 #include "lilygo-tdeck-max.h"
 
 /****************************************************************************
@@ -56,6 +57,13 @@
  */
 
 #define XL9555_REG_CONFIG0  0x06
+
+/* tdeck_gps_powered() takes the GNSS UART's transmit line off the UART */
+
+#if defined(CONFIG_ESP32S3_UART1) && \
+    CONFIG_ESP32S3_UART1_TXPIN != BOARD_GNSS_TX
+#  error "UART1's TX pin is not the GNSS receiver's (BOARD_GNSS_TX)"
+#endif
 
 /****************************************************************************
  * Private Types
@@ -89,6 +97,7 @@ struct tdeck_line_s
  ****************************************************************************/
 
 static void tdeck_lora_powered(bool on);
+static void tdeck_gps_powered(bool on);
 static void tdeck_line_hold(FAR struct tdeck_line_s *line, bool on);
 static int tdeck_line_set(FAR struct tdeck_line_s *line, bool on);
 
@@ -134,7 +143,7 @@ static struct tdeck_line_s g_lines[] =
   { .pin = XL9555_LORA_EN,      .boot = true,  .name = "lora_en",
     .powered = tdeck_lora_powered                                       },
   { .pin = XL9555_GPS_EN,       .boot = false, .name = "gps_en",
-    .awake = true                                                       },
+    .awake = true, .powered = tdeck_gps_powered                         },
   { .pin = XL9555_IMU_1V8_EN,   .boot = true,  .name = "imu_en"       },
   { .pin = XL9555_LORA_ANT,     .boot = true,  .name = "lora_ant"     },
   { .pin = XL9555_MOTOR_EN,     .boot = true,  .name = "motor_en"     },
@@ -190,6 +199,34 @@ static const struct gpio_operations_s g_line_ops =
 static void tdeck_lora_powered(bool on)
 {
   esp_gpiowrite(BOARD_LORA_RST, on);
+}
+
+/****************************************************************************
+ * Name: tdeck_gps_powered
+ *
+ * Description:
+ *   The UART's transmit line idles high into the GNSS receiver's input,
+ *   which feeds the receiver about 25 mA while its rail is off.  With the
+ *   rail off the pin is taken off the UART and held low; with it on, the
+ *   UART gets it back.
+ *
+ ****************************************************************************/
+
+static void tdeck_gps_powered(bool on)
+{
+#ifdef CONFIG_ESP32S3_UART1
+  if (on)
+    {
+      esp_gpio_matrix_out(BOARD_GNSS_TX, U1TXD_OUT_IDX, 0, 0);
+      esp_configgpio(BOARD_GNSS_TX, OUTPUT_FUNCTION_2);
+    }
+  else
+    {
+      esp_gpiowrite(BOARD_GNSS_TX, false);
+      esp_gpio_matrix_out(BOARD_GNSS_TX, SIG_GPIO_OUT_IDX, 0, 0);
+      esp_configgpio(BOARD_GNSS_TX, OUTPUT);
+    }
+#endif
 }
 
 /****************************************************************************
