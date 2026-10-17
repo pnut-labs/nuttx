@@ -120,6 +120,30 @@ void esp_pm_deep_sleep_start(void);
 void esp_pmstandby(uint64_t time_in_us);
 
 /****************************************************************************
+ * Name: esp_pm_wakeup_gpio
+ *
+ * Description:
+ *   Make a GPIO a light sleep wake-up source, or no longer one, at run
+ *   time: the chip wakes while the pin is at the level given.  GPIO
+ *   wake-up needs a level-triggered interrupt: the pin's interrupt type
+ *   becomes that level, and must stay so while the pin is a wake-up
+ *   source.  Its direction, pulls and function are left as they are.  It
+ *   cannot be combined with EXT0 or EXT1 wake-up (PM_EXT0_WAKEUP,
+ *   PM_EXT1_WAKEUP).  Not to be called from an interrupt handler.
+ *
+ * Input Parameters:
+ *   gpio   - The GPIO number.
+ *   high   - True to wake while the pin is high, false while it is low.
+ *   enable - True to make it a wake-up source, false to stop.
+ *
+ * Returned Value:
+ *   OK on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+int esp_pm_wakeup_gpio(int gpio, bool high, bool enable);
+
+/****************************************************************************
  * Name: esp_pmsleep
  *
  * Description:

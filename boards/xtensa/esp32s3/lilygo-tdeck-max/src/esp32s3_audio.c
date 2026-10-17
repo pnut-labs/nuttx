@@ -33,7 +33,8 @@
  * mode, AUDIO_FORMAT_RAW, passes raw PCM through and does not parse WAV
  * headers); recording is /dev/audio/pcm_in0.  Both are the same codec,
  * set up twice: use one at a time.  The amplifier is switched on while the
- * output is reserved by a player.
+ * output is reserved by a player.  I2S stops in light sleep, so the chip
+ * stays out of it while either device is reserved.
  ****************************************************************************/
 
 /****************************************************************************
@@ -50,6 +51,8 @@
 #include <nuttx/audio/pcm.h>
 #include <nuttx/audio/es8311.h>
 #include <nuttx/i2c/i2c_master.h>
+#include <nuttx/nuttx.h>
+#include <nuttx/power/pm.h>
 
 #include <arch/board/board.h>
 
@@ -76,6 +79,23 @@
 #endif
 
 /****************************************************************************
+ * Private Types
+ ****************************************************************************/
+
+/* A device's operations, with reserve, release and shutdown extended */
+
+struct tdeck_audio_s
+{
+  struct audio_ops_s ops;
+  FAR const struct audio_ops_s *orig;
+  bool amp;                         /* Switch the speaker's amplifier */
+  bool used;                        /* Reserved */
+#ifdef CONFIG_PM
+  struct pm_wakelock_s wakelock;    /* Held while used */
+#endif
+};
+
+/****************************************************************************
  * Private Data
  ****************************************************************************/
 
@@ -91,12 +111,12 @@ static const struct es8311_lower_s g_es8311_in =
   .address   = BOARD_I2C_ADDR_ES8311,
 };
 
-/* The playback device's operations, with reserve, release and shutdown
- * extended to switch the amplifier
- */
+static struct tdeck_audio_s g_out =
+{
+  .amp = true,
+};
 
-static struct audio_ops_s g_out_ops;
-static FAR const struct audio_ops_s *g_out_orig;
+static struct tdeck_audio_s g_in;
 
 /****************************************************************************
  * Private Functions
@@ -122,44 +142,108 @@ static void tdeck_amp(bool on)
 }
 
 /****************************************************************************
- * Name: tdeck_out_reserve / tdeck_out_release / tdeck_out_shutdown
+ * Name: tdeck_audio_use
  *
  * Description:
- *   The amplifier is on while a player has reserved the output.  The last
- *   close shuts the device down without releasing it when the player did
- *   not (it failed to start, or it was killed), so shutting down switches
- *   the amplifier off too.
+ *   A device was reserved, or is no longer: switch the amplifier for the
+ *   output, and keep the chip out of light sleep meanwhile.
  *
  ****************************************************************************/
 
-static int tdeck_out_reserve(FAR struct audio_lowerhalf_s *dev
-                             SESSION_ARG)
+static void tdeck_audio_use(FAR struct tdeck_audio_s *priv, bool used)
 {
-  int ret = g_out_orig->reserve(dev SESSION_PASS);
+  if (used == priv->used)
+    {
+      return;
+    }
+
+  if (priv->amp)
+    {
+      tdeck_amp(used);
+    }
+
+#ifdef CONFIG_PM
+  if (used)
+    {
+      pm_wakelock_stay(&priv->wakelock);
+    }
+  else
+    {
+      pm_wakelock_relax(&priv->wakelock);
+    }
+#endif
+
+  priv->used = used;
+}
+
+/****************************************************************************
+ * Name: tdeck_audio_reserve / tdeck_audio_release / tdeck_audio_shutdown
+ *
+ * Description:
+ *   A device is in use while reserved.  The last close shuts the device
+ *   down without releasing it when the user did not (it failed to start,
+ *   or it was killed), so shutting down ends the use too.
+ *
+ ****************************************************************************/
+
+static int tdeck_audio_reserve(FAR struct audio_lowerhalf_s *dev
+                               SESSION_ARG)
+{
+  FAR struct tdeck_audio_s *priv =
+    container_of(dev->ops, struct tdeck_audio_s, ops);
+  int ret = priv->orig->reserve(dev SESSION_PASS);
 
   if (ret >= 0)
     {
-      tdeck_amp(true);
+      tdeck_audio_use(priv, true);
     }
 
   return ret;
 }
 
-static int tdeck_out_release(FAR struct audio_lowerhalf_s *dev
-                             RSESSION_ARG)
+static int tdeck_audio_release(FAR struct audio_lowerhalf_s *dev
+                               RSESSION_ARG)
 {
-  int ret = g_out_orig->release(dev SESSION_PASS);
+  FAR struct tdeck_audio_s *priv =
+    container_of(dev->ops, struct tdeck_audio_s, ops);
+  int ret = priv->orig->release(dev SESSION_PASS);
 
-  tdeck_amp(false);
+  tdeck_audio_use(priv, false);
   return ret;
 }
 
-static int tdeck_out_shutdown(FAR struct audio_lowerhalf_s *dev)
+static int tdeck_audio_shutdown(FAR struct audio_lowerhalf_s *dev)
 {
-  int ret = g_out_orig->shutdown(dev);
+  FAR struct tdeck_audio_s *priv =
+    container_of(dev->ops, struct tdeck_audio_s, ops);
+  int ret = priv->orig->shutdown(dev);
 
-  tdeck_amp(false);
+  tdeck_audio_use(priv, false);
   return ret;
+}
+
+/****************************************************************************
+ * Name: tdeck_audio_wrap
+ *
+ * Description:
+ *   Put the extended operations in front of a device's.
+ *
+ ****************************************************************************/
+
+static void tdeck_audio_wrap(FAR struct tdeck_audio_s *priv,
+                             FAR struct audio_lowerhalf_s *dev,
+                             FAR const char *name)
+{
+  priv->orig         = dev->ops;
+  priv->ops          = *dev->ops;
+  priv->ops.reserve  = tdeck_audio_reserve;
+  priv->ops.release  = tdeck_audio_release;
+  priv->ops.shutdown = tdeck_audio_shutdown;
+  dev->ops           = &priv->ops;
+
+#ifdef CONFIG_PM
+  pm_wakelock_init(&priv->wakelock, name, PM_IDLE_DOMAIN, PM_IDLE);
+#endif
 }
 
 /****************************************************************************
@@ -199,12 +283,7 @@ int tdeck_audio_initialize(void)
       return -ENODEV;
     }
 
-  g_out_orig         = pcm->ops;
-  g_out_ops          = *pcm->ops;
-  g_out_ops.reserve  = tdeck_out_reserve;
-  g_out_ops.release  = tdeck_out_release;
-  g_out_ops.shutdown = tdeck_out_shutdown;
-  pcm->ops           = &g_out_ops;
+  tdeck_audio_wrap(&g_out, pcm, "audio_out");
 
   ret = audio_register("pcm0", pcm);
   if (ret < 0)
@@ -221,6 +300,8 @@ int tdeck_audio_initialize(void)
       auderr("ERROR: Failed to set up the ES8311 input\n");
       return -ENODEV;
     }
+
+  tdeck_audio_wrap(&g_in, codec, "audio_in");
 
   ret = audio_register("pcm_in0", codec);
   if (ret < 0)

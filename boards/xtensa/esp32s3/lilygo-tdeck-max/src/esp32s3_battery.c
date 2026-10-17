@@ -53,6 +53,14 @@
 #  include <nuttx/power/sy6970.h>
 #endif
 
+#if defined(CONFIG_SY6970) && defined(CONFIG_PM) && \
+    defined(CONFIG_SCHED_WORKQUEUE)
+#  include <nuttx/clock.h>
+#  include <nuttx/power/pm.h>
+#  include <nuttx/wqueue.h>
+#  define TDECK_USB_POLL 1
+#endif
+
 #include "lilygo-tdeck-max.h"
 
 #if defined(CONFIG_BQ27220) || defined(CONFIG_SY6970)
@@ -69,12 +77,30 @@
 
 #define TDECK_SHIPMODE_WAIT_MS      100
 
+/* How often the charger is asked whether there is USB power: the board has
+ * no line that tells.  Each time wakes the chip from light sleep.
+ */
+
+#define TDECK_USB_POLL_MS           2000
+
+#ifdef CONFIG_SCHED_LPWORK
+#  define TDECK_USB_WORK            LPWORK
+#else
+#  define TDECK_USB_WORK            HPWORK
+#endif
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
 #ifdef CONFIG_SY6970
 static FAR struct battery_charger_dev_s *g_charger;
+#endif
+
+#ifdef TDECK_USB_POLL
+static struct work_s g_usb_work;
+PM_WAKELOCK_DECLARE_STATIC(g_usb_wakelock, "usb", PM_IDLE_DOMAIN, PM_IDLE);
+static bool g_usb_held;
 #endif
 
 /****************************************************************************
@@ -105,6 +131,50 @@ static int tdeck_gauge_initialize(FAR struct i2c_master_s *i2c)
     }
 
   return battery_gauge_register("/dev/batt0", gauge);
+}
+#endif
+
+/****************************************************************************
+ * Name: tdeck_usb_poll
+ *
+ * Description:
+ *   Keep the chip out of light sleep while there is USB power, so that the
+ *   USB console answers: in light sleep it does not.  The charger reports
+ *   USB power as its "power good" status.
+ *
+ ****************************************************************************/
+
+#ifdef TDECK_USB_POLL
+static void tdeck_usb_poll(FAR void *arg)
+{
+  bool online = g_usb_held;
+
+  if (nxmutex_lock(&g_charger->batlock) >= 0)
+    {
+      if (g_charger->ops->online(g_charger, &online) < 0)
+        {
+          online = g_usb_held;
+        }
+
+      nxmutex_unlock(&g_charger->batlock);
+    }
+
+  if (online != g_usb_held)
+    {
+      if (online)
+        {
+          pm_wakelock_stay(&g_usb_wakelock);
+        }
+      else
+        {
+          pm_wakelock_relax(&g_usb_wakelock);
+        }
+
+      g_usb_held = online;
+    }
+
+  work_queue(TDECK_USB_WORK, &g_usb_work, tdeck_usb_poll, NULL,
+             MSEC2TICK(TDECK_USB_POLL_MS));
 }
 #endif
 
@@ -146,7 +216,18 @@ static int tdeck_charger_initialize(FAR struct i2c_master_s *i2c)
     }
 
   g_charger = charger;
-  return battery_charger_register("/dev/charger0", charger);
+  ret = battery_charger_register("/dev/charger0", charger);
+
+#ifdef TDECK_USB_POLL
+  /* After registering it, which sets up the charger's lock */
+
+  if (ret >= 0)
+    {
+      tdeck_usb_poll(NULL);
+    }
+#endif
+
+  return ret;
 }
 #endif
 

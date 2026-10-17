@@ -24,6 +24,9 @@
 
 #include <nuttx/config.h>
 
+#include <errno.h>
+#include <stdint.h>
+
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
 #include <nuttx/power/pm.h>
@@ -52,9 +55,9 @@
 #ifdef CONFIG_PM_EXT1_WAKEUP
 #  include "driver/rtc_io.h"
 #endif
+#include "driver/gpio.h"
+#include "hal/gpio_types.h"
 #ifdef CONFIG_PM_GPIO_WAKEUP
-#  include "driver/gpio.h"
-#  include "hal/gpio_types.h"
 #  include "esp_gpio.h"
 #endif
 #ifdef CONFIG_PM_UART_WAKEUP
@@ -818,6 +821,46 @@ void esp_pmstandby(uint64_t time_in_us)
       pwrinfo("EXT1 wakeup mask: %" PRIu64 "\n", ext1_mask);
     }
 #endif
+}
+
+/****************************************************************************
+ * Name: esp_pm_wakeup_gpio
+ *
+ * Description:
+ *   See esp_pm.h.
+ *
+ ****************************************************************************/
+
+int esp_pm_wakeup_gpio(int gpio, bool high, bool enable)
+{
+  esp_err_t err;
+
+  if (enable)
+    {
+      err = gpio_wakeup_enable(gpio, high ? GPIO_INTR_HIGH_LEVEL :
+                                            GPIO_INTR_LOW_LEVEL);
+      if (err == ESP_OK)
+        {
+          err = esp_sleep_enable_gpio_wakeup();
+        }
+    }
+  else
+    {
+      err = gpio_wakeup_disable(gpio);
+
+#ifdef CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND
+      /* That isolates the pin in light sleep again: keep it as
+       * configured, as esp_pmstandby() does for every pin.
+       */
+
+      if (err == ESP_OK)
+        {
+          err = gpio_sleep_sel_dis(gpio);
+        }
+#endif
+    }
+
+  return err == ESP_OK ? OK : -EINVAL;
 }
 
 /****************************************************************************

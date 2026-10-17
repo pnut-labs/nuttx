@@ -38,6 +38,7 @@
 #include <nuttx/ioexpander/ioexpander.h>
 #include <nuttx/ioexpander/pca9555.h>
 #include <nuttx/mutex.h>
+#include <nuttx/power/pm.h>
 #include <arch/board/board.h>
 
 #include "espressif/esp_gpio.h"
@@ -69,7 +70,12 @@ struct tdeck_line_s
 #endif
   uint8_t pin;                      /* XL9555_* */
   bool boot;                        /* The level set at start */
+  bool awake;                       /* No light sleep while it is on */
   FAR const char *name;
+#ifdef CONFIG_PM
+  bool held;                        /* wakelock is held */
+  struct pm_wakelock_s wakelock;
+#endif
 
   /* For a power rail whose part has lines on the ESP32-S3: called after
    * the rail comes on, and before it goes off.
@@ -83,6 +89,7 @@ struct tdeck_line_s
  ****************************************************************************/
 
 static void tdeck_lora_powered(bool on);
+static void tdeck_line_hold(FAR struct tdeck_line_s *line, bool on);
 static int tdeck_line_set(FAR struct tdeck_line_s *line, bool on);
 
 #ifdef CONFIG_DEV_GPIO
@@ -108,6 +115,9 @@ static int tdeck_line_describe(FAR struct gpio_dev_s *dev,
  * so the modem's power key reads as pressed until it is set: it comes
  * first.
  *
+ * The GNSS receiver and the modem talk over UARTs, which stop in light
+ * sleep: the chip stays out of it while their rails are on.
+ *
  * The radios' and the amplifier's rails are off, except the LoRa radio's:
  * with its rail off, the radio is fed about 15 mA through its SPI chip
  * select, which must idle high for the bus it shares, while powered it
@@ -119,10 +129,12 @@ static int tdeck_line_describe(FAR struct gpio_dev_s *dev,
 static struct tdeck_line_s g_lines[] =
 {
   { .pin = XL9555_MODEM_PWRKEY, .boot = false, .name = "modem_pwrkey" },
-  { .pin = XL9555_MODEM_PWR,    .boot = false, .name = "modem_pwr"    },
+  { .pin = XL9555_MODEM_PWR,    .boot = false, .name = "modem_pwr",
+    .awake = true                                                       },
   { .pin = XL9555_LORA_EN,      .boot = true,  .name = "lora_en",
     .powered = tdeck_lora_powered                                       },
-  { .pin = XL9555_GPS_EN,       .boot = false, .name = "gps_en"       },
+  { .pin = XL9555_GPS_EN,       .boot = false, .name = "gps_en",
+    .awake = true                                                       },
   { .pin = XL9555_IMU_1V8_EN,   .boot = true,  .name = "imu_en"       },
   { .pin = XL9555_LORA_ANT,     .boot = true,  .name = "lora_ant"     },
   { .pin = XL9555_MOTOR_EN,     .boot = true,  .name = "motor_en"     },
@@ -181,6 +193,33 @@ static void tdeck_lora_powered(bool on)
 }
 
 /****************************************************************************
+ * Name: tdeck_line_hold
+ *
+ * Description:
+ *   Keep the chip out of light sleep while a line marked awake is on.
+ *
+ ****************************************************************************/
+
+static void tdeck_line_hold(FAR struct tdeck_line_s *line, bool on)
+{
+#ifdef CONFIG_PM
+  if (line->awake && on != line->held)
+    {
+      if (on)
+        {
+          pm_wakelock_stay(&line->wakelock);
+        }
+      else
+        {
+          pm_wakelock_relax(&line->wakelock);
+        }
+
+      line->held = on;
+    }
+#endif
+}
+
+/****************************************************************************
  * Name: tdeck_line_set
  *
  * Description:
@@ -207,6 +246,11 @@ static int tdeck_line_set(FAR struct tdeck_line_s *line, bool on)
   if (ret >= 0 && on && line->powered != NULL)
     {
       line->powered(true);
+    }
+
+  if (ret >= 0)
+    {
+      tdeck_line_hold(line, on);
     }
 
   nxmutex_unlock(&g_lock);
@@ -399,6 +443,16 @@ int tdeck_xl9555_initialize(FAR struct i2c_master_s *i2c)
         {
           line->powered(line->boot);
         }
+
+#ifdef CONFIG_PM
+      if (line->awake)
+        {
+          pm_wakelock_init(&line->wakelock, line->name, PM_IDLE_DOMAIN,
+                           PM_IDLE);
+        }
+#endif
+
+      tdeck_line_hold(line, line->boot);
 
 #ifdef CONFIG_DEV_GPIO
       line->gpio.gp_pintype = GPIO_OUTPUT_PIN;

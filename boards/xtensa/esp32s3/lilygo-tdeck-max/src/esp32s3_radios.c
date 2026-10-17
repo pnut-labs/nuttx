@@ -38,6 +38,9 @@
  * devices that they have no way to remove again, so there is nothing to
  * tear down.  A Wi-Fi radio that is up can still be stopped and started
  * with ifdown and ifup.
+ *
+ * Once a radio is up, the chip stays out of light sleep: the Bluetooth
+ * controller holds it awake itself, and for Wi-Fi this file does.
  ****************************************************************************/
 
 /****************************************************************************
@@ -52,6 +55,7 @@
 
 #include <nuttx/kthread.h>
 #include <nuttx/mutex.h>
+#include <nuttx/power/pm.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/ioexpander/gpio.h>
 
@@ -144,6 +148,7 @@ static mutex_t g_radio_lock = NXMUTEX_INITIALIZER;
 
 #ifdef CONFIG_ESPRESSIF_WIFI
 static bool g_wifi_enabled;
+PM_WAKELOCK_DECLARE_STATIC(g_wifi_wakelock, "wifi", PM_IDLE_DOMAIN, PM_IDLE);
 #endif
 
 #ifdef CONFIG_ESPRESSIF_BLE
@@ -276,6 +281,10 @@ static int tdeck_wifi_start(void)
       syslog(LOG_ERR, "ERROR: Failed to initialize Wi-Fi: %d\n", ret);
       return ret;
     }
+
+  /* The Wi-Fi driver does not keep the chip awake while its radio runs */
+
+  pm_wakelock_stay(&g_wifi_wakelock);
 
   g_wifi_enabled = true;
   return OK;

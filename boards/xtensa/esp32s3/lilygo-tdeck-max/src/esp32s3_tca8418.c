@@ -174,6 +174,8 @@ static void tdeck_kbd_enable(FAR const struct tca8418_config_s *config,
     {
       esp_gpioirqdisable(BOARD_KEYBOARD_INT);
     }
+
+  tdeck_power_wake(BOARD_KEYBOARD_INT, false, enable);
 }
 
 /****************************************************************************

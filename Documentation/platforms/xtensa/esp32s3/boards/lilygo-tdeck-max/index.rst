@@ -63,7 +63,9 @@ The port is being written part by part.  Supported so far:
 * the IMU's accelerometer and gyroscope as uORB topics, with the
   ``sensortest`` command (``full``);
 * 2.4 GHz Wi-Fi and Bluetooth LE, off until asked for, with the ``wapi``,
-  ``ping`` and ``bt`` commands (``full``).
+  ``ping`` and ``bt`` commands (``full``);
+* power management: light sleep until the next timer, wake-up pins, and
+  ``/dev/awake`` (``full``).
 
 Serial Console
 ==============
@@ -603,6 +605,74 @@ also needs the low priority work queue (``SCHED_LPWORK``), which the
 Bluetooth stack selects here: a configuration without Bluetooth has to
 set it, or the PSRAM is left out of the heaps.
 
+Power management
+================
+
+``full`` has NuttX's power management (``PM``, with the greedy governor)
+and the tickless scheduler.  Whenever nothing holds the chip awake, it
+light-sleeps (PM_STANDBY) until its next timer, at most ``PM_ALARM_SEC``
+(60 s), or until a wake-up pin.
+
+* Every state is held from the start (``PM_GOVERNOR_EXPLICIT_RELAX=-1``),
+  and the end of the board's start releases PM_NORMAL and PM_IDLE.
+  PM_STANDBY stays held: PM_SLEEP is a deep sleep, which on this board
+  would end in a restart.
+* What holds the chip awake is listed in ``/proc/pm/wakelock0``:
+
+  ============== ======================================================
+  Wakelock       Held while
+  ============== ======================================================
+  ``usb``        there is USB power: the board has no line that tells,
+                 so the charger is asked every 2 s
+  ``gps_en``     the GNSS receiver's rail is on (its UART stops in
+                 light sleep)
+  ``modem_pwr``  the modem's rail is on (likewise)
+  ``audio_out``  ``/dev/audio/pcm0`` is reserved (I2S stops in light
+                 sleep)
+  ``audio_in``   ``/dev/audio/pcm_in0`` is reserved
+  ``wifi``       Wi-Fi has been brought up (until a restart)
+  ``lights``     a light is on (the LED controller stops in light
+                 sleep)
+  ``awake``      ``/dev/awake`` is open
+  ============== ======================================================
+
+  The Bluetooth controller holds the chip awake itself while it runs
+  (under ``system``), and console input does for 6 s (``pm_activity()``).
+  ``/proc/pm/state0`` shows the time in each state; light sleep is
+  standby's ``SLEEP`` column.
+* ``/dev/awake`` holds the chip awake while it is open, for a program
+  that needs it so; the hold ends when the program does::
+
+    nsh> sleep 10 < /dev/awake
+
+  ``pmconfig stay idle`` and ``pmconfig relax idle`` hold and release it
+  from NSH.
+* A pin wakes the chip while its driver has the pin's interrupt enabled:
+  the keyboard's, the touch screen's while ``/dev/input0`` is open, the
+  LoRa radio's DIO1, and the IMU's.
+* The USB console does not wake the chip, and what is typed while it
+  sleeps is lost.  On USB power the chip stays awake, so this only shows
+  with the charger's input cut off.
+* During light sleep every pin keeps its configuration, outputs included,
+  so inputs must not be left floating.
+* The clock gains about 0.85 % of the time slept: the sleep is timed by
+  the internal 150 kHz RC oscillator, which runs faster asleep than when
+  it was calibrated.  The board has no 32 kHz crystal: its pins, GPIO 15
+  and 16, are the keyboard's interrupt and the GNSS receiver's TX.
+
+To measure from the cell with the cable attached, cut the charger's
+input (``EN_HIZ``, bit 7 of its register 0), read the gauge's current in
+mA (register 0x0c, negative while discharging), and restore it::
+
+    nsh> i2c set -b 0 -a 0x6a -r 0x00 -w 8 0xc8
+    nsh> i2c get -b 0 -a 0x55 -r 0x0c -w 16
+    nsh> i2c set -b 0 -a 0x6a -r 0x00 -w 8 0x48
+
+The console is useless while the chip sleeps, so run such a test as a
+script in the background, with the restore in the same script.  The gauge
+takes about 30 s to settle after a change.  Bluetooth leaves part of the
+radio powered after it has been up, until the board is next powered off.
+
 Configurations
 ==============
 
@@ -635,7 +705,8 @@ codec (``/dev/audio/pcm0``, ``/dev/audio/pcm_in0``, ``nxplayer``,
 ``nxrecorder``), the vibration motor (``/dev/input_ff0``, the ``haptic``
 command), the IMU (the uORB topics ``sensor_accel0`` and ``sensor_gyro0``,
 the ``sensortest`` command), Wi-Fi and Bluetooth LE (``/dev/wifi_en``,
-``/dev/ble_en``, the ``wapi``, ``ping`` and ``bt`` commands), and
+``/dev/ble_en``, the ``wapi``, ``ping`` and ``bt`` commands), power
+management (light sleep, ``/proc/pm``, ``/dev/awake``, ``pmconfig``), and
 the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset

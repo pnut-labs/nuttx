@@ -160,6 +160,11 @@ static int tdeck_lora_irq0attach(xcpt_t handler, FAR void *arg)
       return ret < 0 ? ret : -EIO;
     }
 
+  /* Attaching enables the interrupt, and the driver first enables it
+   * itself only after its first interrupt.
+   */
+
+  tdeck_power_wake(BOARD_LORA_DIO1, true, handler != NULL);
   return OK;
 }
 
@@ -177,6 +182,8 @@ static void tdeck_lora_irq0enable(bool enable)
     {
       esp_gpioirqdisable(BOARD_LORA_DIO1);
     }
+
+  tdeck_power_wake(BOARD_LORA_DIO1, true, enable);
 }
 
 /****************************************************************************
