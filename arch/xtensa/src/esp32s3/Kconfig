@@ -130,6 +130,54 @@ config ESP32S3_DEFAULT_CPU_FREQ_MHZ
 	default 160 if ESP32S3_DEFAULT_CPU_FREQ_160
 	default 240 if ESP32S3_DEFAULT_CPU_FREQ_240
 
+config ESP32S3_DFS
+	bool "Dynamic frequency scaling"
+	default n
+	depends on !SMP && !ESP32S3_DEFAULT_CPU_FREQ_80
+	select ARCH_HAVE_UDELAY
+	---help---
+		Run the CPU at the frequency chosen above whenever anything runs,
+		and lower it to ESP32S3_DFS_MIN_FREQ_MHZ while the CPU waits for an
+		interrupt.  The idle loop lowers the frequency before it waits, and
+		every interrupt raises it again, so tasks and interrupt handlers
+		run at the full frequency.  It uses the HAL's power management.
+
+		The APB clock stays at 80 MHz at the frequencies offered here, so
+		peripheral timing is unaffected.  Busy-wait delays (up_udelay())
+		use the ROM's delay, which counts CPU cycles at the current
+		frequency, instead of a loop calibrated with BOARD_LOOPSPERMSEC.
+		Code that turns CPU cycle counts into time at a fixed frequency is
+		only right at the full frequency.  Tested with the USB Serial/JTAG
+		console; with a UART console, the HAL moves it to a clock that does
+		not follow the CPU's.
+
+if ESP32S3_DFS
+
+choice ESP32S3_DFS_MIN_FREQ
+	prompt "Idle CPU frequency"
+	default ESP32S3_DFS_MIN_FREQ_80
+	---help---
+		The frequency while the CPU waits for an interrupt.  Lower
+		frequencies run from the crystal and slow the APB clock with them,
+		which the peripheral drivers do not allow for, so they are not
+		offered.
+
+config ESP32S3_DFS_MIN_FREQ_80
+	bool "80 MHz"
+
+config ESP32S3_DFS_MIN_FREQ_160
+	bool "160 MHz"
+	depends on ESP32S3_DEFAULT_CPU_FREQ_240
+
+endchoice # Idle CPU frequency
+
+config ESP32S3_DFS_MIN_FREQ_MHZ
+	int
+	default 80 if ESP32S3_DFS_MIN_FREQ_80
+	default 160 if ESP32S3_DFS_MIN_FREQ_160
+
+endif # ESP32S3_DFS
+
 menu "Cache configuration"
 
 choice

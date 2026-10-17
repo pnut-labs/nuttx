@@ -65,6 +65,10 @@ else
 CHIP_CSRCS += esp32s3_timerisr.c
 endif
 
+ifeq ($(CONFIG_ESP32S3_DFS),y)
+CHIP_CSRCS += esp32s3_dfs.c
+endif
+
 ifeq ($(CONFIG_ESP32S3_TIMER),y)
 CHIP_CSRCS += esp32s3_tim.c
 ifeq ($(CONFIG_TIMER),y)

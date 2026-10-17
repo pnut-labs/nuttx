@@ -51,6 +51,10 @@
 #include "esp_cpu.h"
 #include "esp_rom_sys.h"
 #include "rom/ets_sys.h"
+
+#ifdef CONFIG_ESP32S3_DFS
+#  include "esp_private/pm_impl.h"
+#endif
 #include "soc/soc.h"
 
 #if defined(CONFIG_ARCH_CHIP_ESP32)
@@ -516,6 +520,14 @@ IRAM_ATTR uint32_t *xtensa_int_decode(uint32_t *cpuints, uint32_t *regs)
 
 #ifdef CONFIG_ARCH_LEDS_CPU_ACTIVITY
   board_autoled_on(LED_CPU);
+#endif
+
+#ifdef CONFIG_ESP32S3_DFS
+  /* Back to the full frequency, if the CPU was idle, for this handler and
+   * for whatever it wakes up.
+   */
+
+  esp_pm_impl_isr_hook();
 #endif
 
   /* Skip over zero bits, eight at a time */

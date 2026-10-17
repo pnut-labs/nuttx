@@ -48,6 +48,7 @@
 #include "soc/rtc.h"
 #include "esp32s3_wdt.h"
 #include "esp32s3_dma.h"
+#include "esp32s3_dfs.h"
 #ifdef CONFIG_BUILD_PROTECTED
 #  include "esp32s3_userspace.h"
 #endif
@@ -477,6 +478,12 @@ noinstrument_function void noreturn_function IRAM_ATTR __esp32s3_start(void)
 void weak_function xtensa_soc_initialize(void)
 {
   sys_startup_fn();
+
+#ifdef CONFIG_ESP32S3_DFS
+  /* The startup functions have initialized the HAL's power management */
+
+  esp32s3_dfs_initialize();
+#endif
 }
 
 /****************************************************************************
