@@ -56,6 +56,9 @@
 #include "esp_irq.h"
 #include "esp_hr_timer.h"
 #include "espressif/esp_wireless.h"
+#ifdef CONFIG_PM
+#  include <nuttx/power/pm.h>
+#endif
 
 #include "soc/rtc.h"
 
@@ -103,6 +106,15 @@
 #ifdef CONFIG_ESPRESSIF_SPIFLASH
 #  define BLE_TASK_EVENT_QUEUE_ITEM_SIZE  8
 #  define BLE_TASK_EVENT_QUEUE_LEN        8
+#endif
+
+/* The controller's power management locks keep the chip out of light
+ * sleep (PM_STANDBY) while they are held.
+ */
+
+#ifdef CONFIG_PM
+#  define esp32s3_pm_lockacquire() pm_stay(PM_IDLE_DOMAIN, PM_IDLE)
+#  define esp32s3_pm_lockrelease() pm_relax(PM_IDLE_DOMAIN, PM_IDLE)
 #endif
 
 /****************************************************************************
@@ -589,13 +601,6 @@ static DRAM_ATTR void * g_wakeup_req_sem = NULL;
 /* wakeup timer */
 
 static DRAM_ATTR esp_timer_handle_t g_btdm_slp_tmr;
-
-#ifdef CONFIG_PM
-
-/* pm_lock to prevent light sleep due to incompatibility currently */
-
-static DRAM_ATTR void * g_light_sleep_pm_lock;
-#endif
 
 /* BT interrupt private data */
 
@@ -2236,8 +2241,8 @@ static void esp_update_time(struct timespec *timespec, uint32_t ticks)
 static void IRAM_ATTR btdm_slp_tmr_callback(void *arg)
 {
 #ifdef CONFIG_PM
-  btdm_vnd_offload_post(BTDM_VND_OL_SIG_WAKEUP_TMR,
-                        (void *)BTDM_ASYNC_WAKEUP_SRC_TMR);
+  r_btdm_vnd_offload_post(BTDM_VND_OL_SIG_WAKEUP_TMR,
+                          (void *)BTDM_ASYNC_WAKEUP_SRC_TMR);
 #endif
 }
 
@@ -2628,16 +2633,6 @@ static void btdm_low_power_mode_deinit(void)
     {
       btdm_deep_sleep_mem_deinit();
       g_lp_cntl.mac_bb_pd = 0;
-    }
-#endif
-
-#ifdef CONFIG_PM
-  if (g_lp_cntl.no_light_sleep)
-    {
-      if (g_light_sleep_pm_lock != NULL)
-        {
-          g_light_sleep_pm_lock = NULL;
-        }
     }
 #endif
 
@@ -3411,7 +3406,7 @@ int esp32s3_bt_controller_disable(void)
 #ifdef CONFIG_PM
   if (g_lp_cntl.no_light_sleep)
     {
-      esp_pm_lock_release(g_light_sleep_pm_lock);
+      esp32s3_pm_lockrelease();
     }
 
   if (g_lp_stat.pm_lock_released == 0)

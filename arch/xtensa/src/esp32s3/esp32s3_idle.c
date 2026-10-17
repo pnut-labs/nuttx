@@ -34,6 +34,13 @@
 #include "xtensa.h"
 #include "espressif/esp_pm.h"
 
+#if defined(CONFIG_PM) && defined(CONFIG_SCHED_TICKLESS)
+#  include "esp32s3_tickless.h"
+#  ifdef CONFIG_ESPRESSIF_HR_TIMER
+#    include "esp_timer.h"
+#  endif
+#endif
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -61,6 +68,23 @@
 #  define CONFIG_PM_SLEEP_WAKEUP_NSEC 0
 #endif
 
+/* The longest PM_STANDBY, in microseconds */
+
+#define ESP32S3_STANDBY_MAX_US \
+  ((uint64_t)CONFIG_PM_ALARM_SEC * 1000000 + CONFIG_PM_ALARM_NSEC / 1000)
+
+/* With the tickless scheduler, PM_STANDBY ends this much before the next
+ * timer is due, so that the timer is not late when waking up takes a
+ * little longer than the HAL expects.
+ */
+
+#define ESP32S3_STANDBY_EARLY_US 500
+
+#if defined(CONFIG_SCHED_TICKLESS) && \
+    CONFIG_ESP32S3_PM_STANDBY_MIN_US <= ESP32S3_STANDBY_EARLY_US
+#  error "ESP32S3_PM_STANDBY_MIN_US must be longer than 500 us"
+#endif
+
 #endif
 
 /****************************************************************************
@@ -76,19 +100,73 @@ static spinlock_t g_esp32s3_idle_lock = SP_UNLOCKED;
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: up_standby_time
+ *
+ * Description:
+ *   How long PM_STANDBY may last, in microseconds: until the scheduler's
+ *   next timer or the next esp_timer alarm, whichever comes first, and no
+ *   longer than PM_ALARM_SEC and PM_ALARM_NSEC.  The call that decides
+ *   the sleep is made with interrupts disabled, so that nothing can become
+ *   due between it and the sleep.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_PM) && defined(CONFIG_SCHED_TICKLESS)
+static uint64_t up_standby_time(void)
+{
+  uint64_t sleep_us = ESP32S3_STANDBY_MAX_US;
+  uint64_t next;
+#ifdef CONFIG_ESPRESSIF_HR_TIMER
+  int64_t alarm;
+  int64_t now;
+#endif
+
+  next = esp32s3_tickless_next();
+  if (next < sleep_us)
+    {
+      sleep_us = next;
+    }
+
+#ifdef CONFIG_ESPRESSIF_HR_TIMER
+  alarm = esp_timer_get_next_alarm_for_wake_up();
+  if (alarm != INT64_MAX)
+    {
+      now = esp_timer_get_time();
+      if (alarm <= now)
+        {
+          return 0;
+        }
+
+      if ((uint64_t)(alarm - now) < sleep_us)
+        {
+          sleep_us = alarm - now;
+        }
+    }
+#endif
+
+  return sleep_us;
+}
+#endif
+
+/****************************************************************************
  * Name: up_idlepm
  *
  * Description:
  *   Perform IDLE state power management.
  *
+ * Returned Value:
+ *   True if the chip slept; false if the caller is to wait for an
+ *   interrupt.
+ *
  ****************************************************************************/
 
 #ifdef CONFIG_PM
-static void up_idlepm(void)
+static bool up_idlepm(void)
 {
   irqstate_t flags;
   static enum pm_state_e oldstate = PM_NORMAL;
   enum pm_state_e newstate;
+  bool slept = false;
   int ret;
   int count;
 
@@ -115,6 +193,18 @@ static void up_idlepm(void)
   /* Decide, which power saving level can be obtained */
 
   newstate = pm_checkstate(PM_IDLE_DOMAIN);
+
+#ifdef CONFIG_SCHED_TICKLESS
+  /* With the tickless scheduler PM_STANDBY lasts until the next timer:
+   * not worth it when that is close.
+   */
+
+  if (newstate == PM_STANDBY &&
+      up_standby_time() < CONFIG_ESP32S3_PM_STANDBY_MIN_US)
+    {
+      newstate = PM_IDLE;
+    }
+#endif
 
   /* Check for state changes */
 
@@ -144,6 +234,13 @@ static void up_idlepm(void)
 
       spin_unlock_irqrestore(&g_esp32s3_idle_lock, flags);
 
+      /* A driver refused the new state: wait for an interrupt instead */
+
+      if (ret < 0)
+        {
+          return false;
+        }
+
       /* MCU-specific power management logic */
 
       switch (newstate)
@@ -156,16 +253,49 @@ static void up_idlepm(void)
 
           case PM_STANDBY:
             {
+#ifdef CONFIG_SCHED_TICKLESS
+              uint64_t standby_us;
+
+              /* Light sleep until the next timer, with interrupts off from
+               * the decision on.  Only the wake-up sources end the sleep:
+               * an interrupt raised meanwhile stays pending and is
+               * serviced after the wake-up.  A thread that ran since
+               * pm_checkstate() above may have taken a hold, so check
+               * again.
+               */
+
+              flags = up_irq_save();
+
+              standby_us = up_standby_time();
+              if (pm_checkstate(PM_IDLE_DOMAIN) >= PM_STANDBY &&
+                  standby_us >= CONFIG_ESP32S3_PM_STANDBY_MIN_US)
+                {
+                  esp_pmstandby(standby_us - ESP32S3_STANDBY_EARLY_US);
+
+                  /* The counter was moved on by the time slept: an alarm
+                   * it passed without reaching is set again.
+                   */
+
+                  esp32s3_tickless_resync();
+                  slept = true;
+                }
+
+              up_irq_restore(flags);
+#else
               /* Enter Force-sleep mode */
 
-              esp_pmstandby(CONFIG_PM_ALARM_SEC * 1000000 +
-                            CONFIG_PM_ALARM_NSEC / 1000);
+              esp_pmstandby(ESP32S3_STANDBY_MAX_US);
+              slept = true;
+#endif
 
               /* Without this, /proc/pm/state0 bills sleep time to wake[]
                * -- pm_stats() needs PM_RESTORE to know time was asleep.
                */
 
-              pm_changestate(PM_IDLE_DOMAIN, PM_RESTORE);
+              if (slept)
+                {
+                  pm_changestate(PM_IDLE_DOMAIN, PM_RESTORE);
+                }
             }
             break;
 
@@ -189,9 +319,11 @@ static void up_idlepm(void)
       pm_changestate(PM_IDLE_DOMAIN, PM_NORMAL);
 #endif
     }
+
+  return slept;
 }
 #else
-#  define up_idlepm()
+#  define up_idlepm() false
 #endif
 
 /****************************************************************************
@@ -234,18 +366,18 @@ void up_idle(void)
       nxsched_process_timer();
 #else
 
-      /* This would be an appropriate place to put some MCU-specific logic
-       * to sleep in a reduced power mode until an interrupt occurs to save
-       * power.
+      /* Perform IDLE mode power management first: waiting for an interrupt
+       * before it would keep the chip awake until the next one, and with
+       * the tickless scheduler that is the next timer.  When it did not
+       * sleep, wait for an interrupt in a reduced power mode.
        */
 
+      if (!up_idlepm())
+        {
 #  if XCHAL_HAVE_INTERRUPTS
-      __asm__ __volatile__ ("waiti 0");
+          __asm__ __volatile__ ("waiti 0");
 #  endif
-
-      /* Perform IDLE mode power management */
-
-      up_idlepm();
+        }
 #endif /* CONFIG_SUPPRESS_INTERRUPTS || CONFIG_SUPPRESS_TIMER_INTS */
 
 #ifdef CONFIG_ESP32S3_SPEED_UP_ISR
