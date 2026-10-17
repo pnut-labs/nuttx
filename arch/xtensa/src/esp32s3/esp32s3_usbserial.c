@@ -475,3 +475,25 @@ void esp32s3_usbserial_write(char ch)
 
   esp32s3_send(&g_uart_usbserial, ch);
 }
+
+/****************************************************************************
+ * Name: esp32s3_usbserial_connect
+ *
+ * Description:
+ *   See esp32s3_usbserial.h.
+ *
+ ****************************************************************************/
+
+void esp32s3_usbserial_connect(bool connect)
+{
+  if (connect)
+    {
+      modifyreg32(USB_SERIAL_JTAG_CONF0_REG, 0,
+                  USB_SERIAL_JTAG_USB_PAD_ENABLE);
+    }
+  else
+    {
+      modifyreg32(USB_SERIAL_JTAG_CONF0_REG,
+                  USB_SERIAL_JTAG_USB_PAD_ENABLE, 0);
+    }
+}
