@@ -34,6 +34,10 @@
 #include "xtensa.h"
 #include "espressif/esp_pm.h"
 
+#ifdef CONFIG_ESP32S3_DFS
+#  include "esp_private/pm_impl.h"
+#endif
+
 #if defined(CONFIG_PM) && defined(CONFIG_SCHED_TICKLESS)
 #  include "esp32s3_tickless.h"
 #  ifdef CONFIG_ESPRESSIF_HR_TIMER
@@ -374,6 +378,14 @@ void up_idle(void)
 
       if (!up_idlepm())
         {
+#  ifdef CONFIG_ESP32S3_DFS
+          /* Drop to the idle frequency.  The interrupt that ends the wait
+           * raises it again.
+           */
+
+          esp_pm_impl_idle_hook();
+#  endif
+
 #  if XCHAL_HAVE_INTERRUPTS
           __asm__ __volatile__ ("waiti 0");
 #  endif

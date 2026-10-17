@@ -409,3 +409,13 @@ ifeq ($(CONFIG_ESPRESSIF_SIMPLE_BOOT),y)
 endif
 
 CFLAGS += ${DEFINE_PREFIX}ESP_PLATFORM=1
+
+# The HAL's sdkconfig.h for this chip leaves its power management out.
+# Dynamic frequency scaling needs it: esp_pm_impl_init() then runs among the
+# startup functions, and esp_pm_configure() does its job.  Light sleep then
+# recalibrates the slow clock every time, as it did without it.
+
+ifeq ($(CONFIG_ESP32S3_DFS),y)
+  CFLAGS += ${DEFINE_PREFIX}CONFIG_PM_ENABLE=1
+  CFLAGS += ${DEFINE_PREFIX}CONFIG_PM_LIGHTSLEEP_RTC_OSC_CAL_INTERVAL=1
+endif

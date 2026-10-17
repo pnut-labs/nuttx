@@ -648,6 +648,7 @@ SECTIONS
   .flash.rodata : ALIGN(0x10000)
   {
     _rodata_reserved_start = ABSOLUTE(.);
+    _rodata_start = ABSOLUTE(.);
 
     /* !DO NOT PUT ANYTHING BEFORE THIS! */
     /* Should be the first.  App version info. */

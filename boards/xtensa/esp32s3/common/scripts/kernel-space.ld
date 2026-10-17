@@ -471,6 +471,7 @@ SECTIONS
   .flash.rodata : ALIGN(0x10)
   {
     _rodata_reserved_start = ABSOLUTE(.);
+    _rodata_start = ABSOLUTE(.);
     _srodata = ABSOLUTE(.);
 
     /* !DO NOT PUT ANYTHING BEFORE THIS! */
