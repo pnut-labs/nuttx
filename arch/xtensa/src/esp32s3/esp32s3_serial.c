@@ -298,6 +298,27 @@ static uart_dev_t g_uart2_dev =
 #ifdef CONFIG_ESP32S3_UART
 
 /****************************************************************************
+ * Name: esp32s3_pm_activity
+ *
+ * Description:
+ *   Keep the chip out of light sleep for a while after the UART's activity
+ *   (ESP32S3_UARTn_PM_AWAKE_MS): light sleep stops the UART.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_PM
+static inline void esp32s3_pm_activity(struct esp32s3_uart_s *priv)
+{
+  if (priv->pm_awake_ms > 0)
+    {
+      pm_wakelock_staytimeout(&priv->pm_awake, priv->pm_awake_ms);
+    }
+}
+#else
+#  define esp32s3_pm_activity(priv)
+#endif
+
+/****************************************************************************
  * Name: uart_handler
  *
  * Description:
@@ -319,6 +340,11 @@ static int uart_handler(int irq, void *context, void *arg)
   uint32_t int_status;
 
   int_status = getreg32(UART_INT_ST_REG(priv->id));
+
+  if ((int_status & (tx_mask | rx_mask)) != 0)
+    {
+      esp32s3_pm_activity(priv);
+    }
 
 #ifdef HAVE_RS485
   if ((int_status & UART_TX_BRK_IDLE_DONE_INT_ST_M) != 0 &&
@@ -612,7 +638,18 @@ static void esp32s3_txint(struct uart_dev_s *dev, bool enable)
 {
   struct esp32s3_uart_s *priv = dev->priv;
   uint32_t ints_mask = UART_TXFIFO_EMPTY_INT_ENA_M | UART_TX_DONE_INT_ENA_M;
-  irqstate_t flags = spin_lock_irqsave(&priv->lock);
+  irqstate_t flags;
+
+  /* A transmission starts: stay awake until it has gone, and for the
+   * answer
+   */
+
+  if (enable)
+    {
+      esp32s3_pm_activity(priv);
+    }
+
+  flags = spin_lock_irqsave(&priv->lock);
 
   if (enable)
     {

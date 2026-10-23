@@ -286,6 +286,34 @@ int board_spiflash_init(void);
 #endif
 
 /****************************************************************************
+ * Name: tdeck_modem_initialize
+ *
+ * Description:
+ *   Set up the modem's ring indicator and DTR, and register them as
+ *   /dev/modem_ri and /dev/modem_dtr.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: tdeck_modem_listen
+ *
+ * Description:
+ *   Listen to the modem's ring indicator while the modem's rail is on, or
+ *   no longer: RI then wakes the chip and keeps it awake for a while.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_DEV_GPIO) && defined(CONFIG_IOEXPANDER_PCA9555)
+int tdeck_modem_initialize(void);
+void tdeck_modem_listen(bool on);
+#else
+#  define tdeck_modem_listen(on)
+#endif
+
+/****************************************************************************
  * Name: tdeck_power_initialize
  *
  * Description:

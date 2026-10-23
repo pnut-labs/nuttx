@@ -31,8 +31,11 @@
  * What keeps the chip awake, each a wakelock in /proc/pm/wakelock0:
  *
  *   usb                  USB power (esp32s3_battery.c)
- *   gps_en, modem_pwr    the GNSS receiver's and the modem's rails
- *                        (esp32s3_xl9555.c)
+ *   gps_en               the GNSS receiver's rail (esp32s3_xl9555.c)
+ *   uart2                the modem's UART in use, and 1 s after
+ *                        (ESP32S3_UART2_PM_AWAKE_MS)
+ *   modem_ri             the modem's ring indicator low, and 2 s after
+ *                        (esp32s3_modem.c)
  *   audio_out, audio_in  an audio device reserved (esp32s3_audio.c)
  *   wifi                 Wi-Fi up (esp32s3_radios.c); BLE holds the chip
  *                        awake itself
@@ -44,7 +47,7 @@
  *
  * A pin wakes the chip while its driver has the pin's interrupt enabled:
  * the keyboard's, the touch screen's while it is open, the LoRa radio's
- * DIO1 and the IMU's.
+ * DIO1, the IMU's, and the modem's ring indicator while its rail is on.
  ****************************************************************************/
 
 /****************************************************************************

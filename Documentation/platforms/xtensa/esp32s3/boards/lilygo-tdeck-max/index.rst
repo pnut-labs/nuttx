@@ -55,7 +55,8 @@ The port is being written part by part.  Supported so far:
 * the LoRa radio as ``/dev/lora0``, and the ``lora`` command (``full``);
 * the GNSS receiver through NuttX's GNSS upper half, and the ``gps``
   command (``full``);
-* the modem on UART2, and the ``modem`` command (``full``);
+* the modem on UART2, its ring indicator and DTR as ``/dev/modem_ri`` and
+  ``/dev/modem_dtr``, and the ``modem`` command (``full``);
 * the audio codec as ``/dev/audio/pcm0`` and ``/dev/audio/pcm_in0``, with
   ``nxplayer`` and ``nxrecorder`` (``full``);
 * the vibration motor as ``/dev/input_ff0``, and the ``haptic`` command
@@ -422,6 +423,30 @@ The SIMCom A7682E (4G LTE Cat 1) is on UART2 at 115200 baud as
 * The level shifter between the modem and the ESP32-S3 (RX, TX, RI and
   DTR) is powered by the modem's own 1.8 V output, so while the modem is
   off UART2 is silent.
+* The chip light-sleeps with the modem on: ``uart2`` keeps it awake
+  while the modem is spoken to and for 1 s after, and the modem's ring
+  indicator (RI, GPIO 7, ``/dev/modem_ri``) wakes it and holds it awake
+  while it is low and for 2 s after, when the modem has something to say:
+  an incoming call or SMS, and other unsolicited results as ``AT+CFGRI``
+  sets.  RI reads low while the modem is off or starting (its level
+  shifter is unpowered), so it is listened to only while ``modem_pwr`` is
+  on.
+* The modem sleeps too with ``AT+CSCLK=1`` while DTR (GPIO 8,
+  ``/dev/modem_dtr``) is high; it then answers nothing until DTR goes
+  low, and keeps its unsolicited results until then.  DTR is low from the
+  start, and goes low again when ``modem_pwr`` goes off, so the modem stays
+  awake for commands unless told otherwise.  The ``modem`` command drives
+  DTR low while it runs, and puts it back after, unless it has turned the
+  modem off::
+
+    nsh> modem at +CSCLK=1
+    nsh> gpio -o 1 /dev/modem_dtr     # the modem may sleep
+    nsh> gpio -o 0 /dev/modem_dtr     # awake: it answers again
+
+* Measured from the cell without a SIM (2026-10-17), the modem on and
+  idle: 60 mA with the chip awake, 35 mA with the chip asleep, and
+  31 mA and 5 mA with the modem asleep as well.  Waking it by RI with a
+  real incoming call or SMS has not been tried, for want of a SIM.
 * The SIM and the microSD card share one holder and can both be fitted.
   The modem has its own microphone; its speaker output and the codec's
   share the speaker, chosen by ``audio_sel``.
@@ -660,7 +685,9 @@ it waits for an interrupt.
                  so the charger is asked every 2 s
   ``gps_en``     the GNSS receiver's rail is on (its UART stops in
                  light sleep)
-  ``modem_pwr``  the modem's rail is on (likewise)
+  ``uart2``      UART2, the modem's, sends or receives, and for
+                 ``ESP32S3_UART2_PM_AWAKE_MS`` (1 s) after, for the answer
+  ``modem_ri``   the modem's ring indicator is low, and for 2 s after
   ``audio_out``  ``/dev/audio/pcm0`` is reserved (I2S stops in light
                  sleep)
   ``audio_in``   ``/dev/audio/pcm_in0`` is reserved
@@ -683,7 +710,8 @@ it waits for an interrupt.
   from NSH.
 * A pin wakes the chip while its driver has the pin's interrupt enabled:
   the keyboard's, the touch screen's while ``/dev/input0`` is open, the
-  LoRa radio's DIO1, and the IMU's.
+  LoRa radio's DIO1, the IMU's, and the modem's ring indicator while the
+  modem's rail is on.
 * Without USB power the USB Serial/JTAG port is disconnected, as if the
   cable had been pulled, and connected again within 2 s of USB power
   coming back.  The USB console could not wake the chip anyway.  Writes
