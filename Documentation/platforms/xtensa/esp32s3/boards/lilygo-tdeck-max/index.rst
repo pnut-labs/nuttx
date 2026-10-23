@@ -290,8 +290,8 @@ microSD card
 The microSD slot is on the shared SPI bus (chip select GPIO 48) and is
 always powered.  ``full`` registers the card as ``/dev/mmcsd0`` (NuttX's
 SPI MMC/SD driver, through the common ``board_sdmmc_spi_initialize()``)
-and has FAT, with long and lower-case names; mounting it is left to the
-system::
+and has FAT, with long (up to 64 characters, ``NAME_MAX``) and lower-case
+names; mounting it is left to the system::
 
     nsh> mount -t vfat /dev/mmcsd0 /mnt/sd
     nsh> umount /mnt/sd
@@ -653,9 +653,17 @@ Offset       Size     What
   (``ESP32S3_STORAGE_MTD_OFFSET``, ``ESP32S3_STORAGE_MTD_SIZE``,
   ``ESP32S3_SPIFLASH_LITTLEFS``, ``ESP32S3_SPIFLASH_MOUNTPT``), and
   formats it the first time it cannot mount it.
-* littlefs keeps the longest name a volume takes (32 characters,
-  ``FS_LITTLEFS_NAME_MAX``) in the volume itself: a longer one needs the
-  partition formatted again.
+* littlefs keeps the longest name a volume takes in the volume itself.
+  ``full`` sets 64 characters (``NAME_MAX``, which
+  ``FS_LITTLEFS_NAME_MAX`` follows), for names such as a settings file
+  named after an app's id; a volume formatted with a shorter limit keeps
+  it.  Firmware built with a shorter limit cannot mount a volume made
+  with a longer one, and formats it again, losing its files.  To format
+  the partition again, erase it and restart: the board formats it when it
+  cannot mount it::
+
+    $ esptool -p /dev/ttyACM0 erase-region 0x870000 0x200000
+
 * The device data and the package store are not used yet.
 * Earlier firmware for this board kept littlefs volumes at 0x800000 and
   0xf00000: the system partition overwrites part of the first.
