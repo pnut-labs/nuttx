@@ -68,6 +68,12 @@ ifeq ($(CONFIG_FF_DRV2605)$(CONFIG_IOEXPANDER_PCA9555),yy)
 CSRCS += esp32s3_haptic.c
 endif
 
+# The modem's RI and DTR; the XL9555 switches its rail
+
+ifeq ($(CONFIG_DEV_GPIO)$(CONFIG_IOEXPANDER_PCA9555),yy)
+CSRCS += esp32s3_modem.c
+endif
+
 # Wi-Fi and Bluetooth LE, brought up when asked for
 
 ifeq ($(CONFIG_ESPRESSIF_WIRELESS),y)

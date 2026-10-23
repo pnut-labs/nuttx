@@ -121,6 +121,18 @@ int esp32s3_bringup(void)
       tdeck_battery_initialize(i2c);
 #  endif
 
+#  if defined(CONFIG_DEV_GPIO) && defined(CONFIG_IOEXPANDER_PCA9555)
+      /* The modem's RI and DTR, as /dev/modem_ri and /dev/modem_dtr: before
+       * the XL9555, whose modem rail tells when to listen to RI
+       */
+
+      ret = tdeck_modem_initialize();
+      if (ret < 0)
+        {
+          syslog(LOG_ERR, "ERROR: Failed to set up RI and DTR: %d\n", ret);
+        }
+#  endif
+
 #  ifdef CONFIG_IOEXPANDER_PCA9555
       ret = tdeck_xl9555_initialize(i2c);
       if (ret < 0)

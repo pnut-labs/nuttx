@@ -98,6 +98,7 @@ struct tdeck_line_s
 
 static void tdeck_lora_powered(bool on);
 static void tdeck_gps_powered(bool on);
+static void tdeck_modem_powered(bool on);
 static void tdeck_line_hold(FAR struct tdeck_line_s *line, bool on);
 static int tdeck_line_set(FAR struct tdeck_line_s *line, bool on);
 
@@ -124,8 +125,10 @@ static int tdeck_line_describe(FAR struct gpio_dev_s *dev,
  * so the modem's power key reads as pressed until it is set: it comes
  * first.
  *
- * The GNSS receiver and the modem talk over UARTs, which stop in light
- * sleep: the chip stays out of it while their rails are on.
+ * The GNSS receiver talks over a UART, which stops in light sleep: the
+ * chip stays out of it while the receiver's rail is on.  The modem's rail
+ * does not hold it: the modem's ring indicator wakes it, and UART2 keeps
+ * it awake while in use (esp32s3_modem.c, ESP32S3_UART2_PM_AWAKE_MS).
  *
  * The radios' and the amplifier's rails are off, except the LoRa radio's:
  * with its rail off, the radio is fed about 15 mA through its SPI chip
@@ -139,7 +142,7 @@ static struct tdeck_line_s g_lines[] =
 {
   { .pin = XL9555_MODEM_PWRKEY, .boot = false, .name = "modem_pwrkey" },
   { .pin = XL9555_MODEM_PWR,    .boot = false, .name = "modem_pwr",
-    .awake = true                                                       },
+    .powered = tdeck_modem_powered                                      },
   { .pin = XL9555_LORA_EN,      .boot = true,  .name = "lora_en",
     .powered = tdeck_lora_powered                                       },
   { .pin = XL9555_GPS_EN,       .boot = false, .name = "gps_en",
@@ -227,6 +230,19 @@ static void tdeck_gps_powered(bool on)
       esp_configgpio(BOARD_GNSS_TX, OUTPUT);
     }
 #endif
+}
+
+/****************************************************************************
+ * Name: tdeck_modem_powered
+ *
+ * Description:
+ *   Listen to the modem's ring indicator while its rail is on.
+ *
+ ****************************************************************************/
+
+static void tdeck_modem_powered(bool on)
+{
+  tdeck_modem_listen(on);
 }
 
 /****************************************************************************
