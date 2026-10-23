@@ -1453,6 +1453,17 @@ config ESP32S3_UART0_CTSPIN
 	default 16
 	range 0 48
 
+config ESP32S3_UART0_PM_AWAKE_MS
+	int "UART0: stay awake after activity (ms)"
+	default 0
+	depends on PM
+	---help---
+		Light sleep stops the UART: a transmission in progress stalls, and
+		what arrives meanwhile is lost.  Keep the chip out of light sleep
+		(PM_STANDBY) while UART0 sends or receives, and for this many
+		milliseconds after: for a device that answers, such as a modem,
+		long enough for its answer.  0 for no hold.
+
 endif # ESP32S3_UART0
 
 if ESP32S3_UART1
@@ -1504,6 +1515,17 @@ config ESP32S3_UART1_CTSPIN
 	default 20
 	range 0 48
 
+config ESP32S3_UART1_PM_AWAKE_MS
+	int "UART1: stay awake after activity (ms)"
+	default 0
+	depends on PM
+	---help---
+		Light sleep stops the UART: a transmission in progress stalls, and
+		what arrives meanwhile is lost.  Keep the chip out of light sleep
+		(PM_STANDBY) while UART1 sends or receives, and for this many
+		milliseconds after: for a device that answers, such as a modem,
+		long enough for its answer.  0 for no hold.
+
 endif # ESP32S3_UART1
 
 if ESP32S3_UART2
@@ -1554,6 +1576,17 @@ config ESP32S3_UART2_CTSPIN
 	depends on SERIAL_OFLOWCONTROL
 	default 24
 	range 0 48
+
+config ESP32S3_UART2_PM_AWAKE_MS
+	int "UART2: stay awake after activity (ms)"
+	default 0
+	depends on PM
+	---help---
+		Light sleep stops the UART: a transmission in progress stalls, and
+		what arrives meanwhile is lost.  Keep the chip out of light sleep
+		(PM_STANDBY) while UART2 sends or receives, and for this many
+		milliseconds after: for a device that answers, such as a modem,
+		long enough for its answer.  0 for no hold.
 
 endif # ESP32S3_UART2
 

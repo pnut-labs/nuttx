@@ -39,6 +39,10 @@
 #include <nuttx/irq.h>
 #include <nuttx/spinlock.h>
 
+#ifdef CONFIG_PM
+#  include <nuttx/power/pm.h>
+#endif
+
 #include "chip.h"
 #include "esp_irq.h"
 #include "hardware/esp32s3_gpio_sigmap.h"
@@ -122,6 +126,13 @@ struct esp32s3_uart_s
   bool     rs485_dir_polarity; /* UART RS-485 DIR TXEN polarity */
 #endif
   spinlock_t lock;             /* Device-specific lock */
+#ifdef CONFIG_PM
+  int      pm_awake_ms;        /* Awake after activity (ms), or 0 */
+
+  /* Held while the UART is active, and pm_awake_ms after */
+
+  struct pm_wakelock_s pm_awake;
+#endif
 };
 
 extern struct esp32s3_uart_s g_uart0_config;
