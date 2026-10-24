@@ -817,11 +817,17 @@ the ``sensortest`` command), Wi-Fi and Bluetooth LE (``/dev/wifi_en``,
 ``/dev/ble_en``, the ``wapi``, ``ping`` and ``bt`` commands), power
 management (light sleep, frequency scaling, ``/proc/pm``, ``/dev/awake``,
 ``pmconfig``), the RTC (``/dev/rtc0``, the ``date`` command), and
-the system log in a 4 KB RAM log (``dmesg``).
+the system log in a 64 KB RAM log in the PSRAM (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset
 reason (1 is a power-up, 3 a software reset, 21 a reset over USB, as
-``esptool`` does).
+``esptool`` does).  It lives in ``.ext_ram.noinit``
+(``ESP32S3_SPIRAM_NOINIT``), which start-up and the PSRAM test leave
+alone, and each line is written back from the data cache as it is
+written (``RAMLOG_CLEAN_DCACHE``), so a reset over USB keeps it as well
+as a software reset (a watchdog's should too; not tried); a power loss
+clears it.  The PSRAM is out of reach while the SPI flash is written:
+the dump of a crash then is lost, as its lines cannot be written.
 
 Programs get 4 KB stacks by default (``DEFAULT_TASK_STACKSIZE``): with
 2 KB, ``nxplayer`` and ``uorb_listener`` overflowed theirs.

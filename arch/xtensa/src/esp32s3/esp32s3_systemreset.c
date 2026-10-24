@@ -28,6 +28,7 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
+#include <nuttx/cache.h>
 
 #include "xtensa.h"
 #include "soc/rtc_cntl_reg.h"
@@ -142,6 +143,12 @@ void up_shutdown_handler(void)
 
 void up_systemreset(void)
 {
+#ifdef CONFIG_ESP32S3_SPIRAM_NOINIT
+  /* What the data cache holds for the SPI RAM kept across the reset */
+
+  up_clean_dcache_all();
+#endif
+
   putreg32(RTC_CNTL_SW_SYS_RST, RTC_CNTL_OPTIONS0_REG);
 
   /* Wait for the reset */

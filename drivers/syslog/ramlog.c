@@ -43,6 +43,7 @@
 #include <sys/boardctl.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/cache.h>
 #include <nuttx/init.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/spinlock.h>
@@ -307,6 +308,50 @@ static void ramlog_pollnotify(FAR struct ramlog_dev_s *priv)
 }
 
 /****************************************************************************
+ * Name: ramlog_clean
+ *
+ * Description:
+ *   Write part of the buffer, and its header, back from the data cache to
+ *   the memory, which a reset keeps (CONFIG_RAMLOG_CLEAN_DCACHE).
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_RAMLOG_CLEAN_DCACHE
+static void ramlog_clean(FAR struct ramlog_dev_s *priv, uint32_t offset,
+                         size_t len)
+{
+  FAR struct ramlog_header_s *header = priv->rl_header;
+  FAR char *buf = header->rl_buffer;
+  size_t tail = priv->rl_bufsize - offset;
+
+  /* The syslog's buffer only, the one a reset keeps; the data first, so
+   * that a reset in between leaves the old head
+   */
+
+  if (priv != &g_sysdev)
+    {
+      return;
+    }
+
+  if (len > tail)
+    {
+      up_clean_dcache((uintptr_t)&buf[offset],
+                      (uintptr_t)&buf[priv->rl_bufsize]);
+      up_clean_dcache((uintptr_t)buf, (uintptr_t)&buf[len - tail]);
+    }
+  else if (len > 0)
+    {
+      up_clean_dcache((uintptr_t)&buf[offset],
+                      (uintptr_t)&buf[offset + len]);
+    }
+
+  up_clean_dcache((uintptr_t)header, (uintptr_t)buf);
+}
+#else
+#  define ramlog_clean(priv, offset, len)
+#endif
+
+/****************************************************************************
  * Name: ramlog_flush
  ****************************************************************************/
 
@@ -319,6 +364,8 @@ static void ramlog_bufferflush(FAR struct ramlog_dev_s *priv)
     {
       upriv->rl_tail = 0;
     }
+
+  ramlog_clean(priv, 0, 0);
 }
 
 /****************************************************************************
@@ -352,6 +399,7 @@ static void ramlog_copybuf(FAR struct ramlog_dev_s *priv,
     }
 
   header->rl_head += len;
+  ramlog_clean(priv, offset, len);
 }
 
 /****************************************************************************
@@ -403,6 +451,10 @@ static ssize_t ramlog_addbuf(FAR struct ramlog_dev_s *priv,
     {
       memset(header, 0, sizeof(g_sysbuffer));
       header->rl_magic = RAMLOG_MAGIC_NUMBER;
+
+      /* Once, at the first start after a power loss */
+
+      ramlog_clean(priv, 0, priv->rl_bufsize);
     }
 #endif
 

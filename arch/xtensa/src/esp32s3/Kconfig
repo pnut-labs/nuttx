@@ -1146,6 +1146,25 @@ config ESP32S3_SPIRAM_MEMTEST
 		Disabling this test will reduce startup time at the expense
 		of testing the external memory.
 
+config ESP32S3_SPIRAM_NOINIT
+	bool "Data in SPI RAM kept across a reset"
+	default n
+	depends on ESP32S3_SPIRAM_BOOT_INIT && BUILD_FLAT
+	depends on !ESP32S3_APP_FORMAT_LEGACY
+	depends on !ESP32S3_SPIRAM_FETCH_INSTRUCTIONS && !ESP32S3_SPIRAM_RODATA
+	---help---
+		Adds the section .ext_ram.noinit in SPI RAM, which start-up leaves
+		as it was, and the memory test skips: what it holds survives a
+		reset short of a power loss.  The data cache is written back
+		before a software reset (up_systemreset(), as a reboot or an
+		assertion with BOARD_RESET_ON_ASSERT does); after any other reset,
+		what was not written back yet is lost (RAMLOG_CLEAN_DCACHE writes
+		the RAM log back as it goes).  The RAM log can live there, for
+		example, with RAMLOG_BUFFER_SECTION=".ext_ram.noinit".  SPI RAM is
+		mapped only once start-up has brought it up: a write there before
+		that faults, as the debug output of DEBUG_MM_INFO or DEBUG_MM_WARN
+		while SPI RAM comes up would, to a RAM log there.
+
 endmenu # SPI RAM Configuration
 
 menu "Memory Configuration"
