@@ -111,11 +111,11 @@ as an NSH command:
     Builtin Apps:
     hello
 
-The ``dmesg`` command dumps the contents and clears the RAMLOG:
+The ``dmesg -c`` command dumps the contents and clears the RAMLOG:
 
 .. code-block:: bash
 
-    nsh> dmesg
+    nsh> dmesg -c
     nx_start: Entry
     up_unblock_task: Unblocking TCB=52bc70
     up_unblock_task: New Active Task TCB=52bc70
@@ -155,8 +155,8 @@ The ``dmesg`` command dumps the contents and clears the RAMLOG:
     posix_spawn_exec: ERROR: exec failed: 22
     nsh> 
 
-As mentioned, the dmesg command clears the RAMLOG. So when it is used again, 
-only new debug output is shown:
+As mentioned, ``dmesg -c`` clears the RAMLOG. So when ``dmesg`` is used
+again, only new debug output is shown:
 
 .. code-block:: bash
 

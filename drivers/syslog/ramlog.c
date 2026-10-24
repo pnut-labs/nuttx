@@ -250,6 +250,7 @@ static uint32_t ramlog_bufferused(FAR struct ramlog_dev_s *priv,
                                   FAR struct ramlog_user_s *upriv)
 {
   uint32_t used = priv->rl_header->rl_head - upriv->rl_tail;
+
   return used > priv->rl_bufsize ? priv->rl_bufsize : used;
 }
 
@@ -627,6 +628,15 @@ static int ramlog_file_ioctl(FAR struct file *filep, int cmd,
         upriv->rl_threashold = (uint32_t)arg;
         break;
       case BIOC_FLUSH:
+
+        /* BIOC_FLUSH comes from fsync() and sync(): the buffer is RAM,
+         * with nothing to write back, so keep it.  SYSLOGIOC_CLEAR
+         * empties it.
+         */
+
+        break;
+
+      case SYSLOGIOC_CLEAR:
         ramlog_bufferflush(priv);
         break;
 

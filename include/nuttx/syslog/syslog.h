@@ -93,6 +93,10 @@
 #define SYSLOGIOC_SETRATELIMIT _SYSLOGIOC(0x0003)
 #define SYSLOGIOC_GETRATELIMIT _SYSLOGIOC(0x0004)
 
+/* Discard what a log device holds, the RAM log's buffer for every reader */
+
+#define SYSLOGIOC_CLEAR _SYSLOGIOC(0x0005)
+
 #define SYSLOG_CHANNEL_NAME_LEN       32
 
 #define SYSLOG_CHANNEL_DISABLE        0x01
