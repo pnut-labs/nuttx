@@ -290,9 +290,9 @@ static int usage_entry(FAR const char *mountpoint,
 {
   FAR struct mount_info_s *info = (FAR struct mount_info_s *)arg;
   FAR const char *fstype;
-  fsblkcnt_t size;
-  fsblkcnt_t used;
-  fsblkcnt_t free;
+  uint64_t size;
+  uint64_t used;
+  uint64_t free;
   int which;
   char sizelabel;
   char freelabel;
@@ -301,6 +301,8 @@ static int usage_entry(FAR const char *mountpoint,
   {
     'B', 'K', 'M', 'G', 'T'
   };
+
+  const int last = (int)sizeof(labels) - 1;
 
   DEBUGASSERT(mountpoint != NULL && statbuf != NULL && info != NULL);
 
@@ -317,14 +319,19 @@ static int usage_entry(FAR const char *mountpoint,
 
   fstype = fs_gettype(statbuf);
 
-  size = statbuf->f_bsize * statbuf->f_blocks;
-  free = statbuf->f_bsize * statbuf->f_bavail;
+  /* In bytes, which fsblkcnt_t may not hold: without FS_LARGEFILE it has
+   * 32 bits, and a card over 4 GiB would wrap
+   */
+
+  size = (uint64_t)statbuf->f_bsize * statbuf->f_blocks;
+  free = (uint64_t)statbuf->f_bsize * statbuf->f_bavail;
   used = size - free;
 
   /* Find the label for size */
 
   which = 0;
-  while (size >= 9999 || ((size & 0x3ff) == 0 && size != 0))
+  while (which < last &&
+         (size >= 9999 || ((size & 0x3ff) == 0 && size != 0)))
     {
       which++;
       size >>= 10;
@@ -335,7 +342,8 @@ static int usage_entry(FAR const char *mountpoint,
   /* Find the label for free */
 
   which = 0;
-  while (free >= 9999 || ((free & 0x3ff) == 0 && free != 0))
+  while (which < last &&
+         (free >= 9999 || ((free & 0x3ff) == 0 && free != 0)))
     {
       which++;
       free >>= 10;
@@ -346,7 +354,8 @@ static int usage_entry(FAR const char *mountpoint,
   /* Find the label for used */
 
   which = 0;
-  while (used >= 9999 || ((used & 0x3ff) == 0 && used != 0))
+  while (which < last &&
+         (used >= 9999 || ((used & 0x3ff) == 0 && used != 0)))
     {
       which++;
       used >>= 10;
@@ -357,7 +366,7 @@ static int usage_entry(FAR const char *mountpoint,
   /* Generate usage list one line at a time */
 
   mount_sprintf(info,
-    "  %-10s %8" PRIuOFF "%c %8" PRIuOFF "%c  %8" PRIuOFF "%c %s\n",
+    "  %-10s %8" PRIu64 "%c %8" PRIu64 "%c  %8" PRIu64 "%c %s\n",
     fstype, size, sizelabel, used, usedlabel, free, freelabel, mountpoint);
 
   return (info->totalsize >= info->buflen) ? 1 : 0;
