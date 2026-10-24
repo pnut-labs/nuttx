@@ -615,18 +615,26 @@ static int es8311_setbitspersample(FAR struct es8311_dev_s *priv)
         return -EINVAL;
     }
 
-  ret = I2S_RXDATAWIDTH(priv->i2s, priv->bpsamp);
-  if (ret < 0)
+  /* Only the directions this instance uses: see es8311_setsamplerate() */
+
+  if (priv->audio_mode != ES_MODULE_DAC)
     {
-      auderr("I2S_RXDATAWIDTH failed.\n");
-      return ret;
+      ret = I2S_RXDATAWIDTH(priv->i2s, priv->bpsamp);
+      if (ret < 0)
+        {
+          auderr("I2S_RXDATAWIDTH failed.\n");
+          return ret;
+        }
     }
 
-  ret = I2S_TXDATAWIDTH(priv->i2s, priv->bpsamp);
-  if (ret < 0)
+  if (priv->audio_mode != ES_MODULE_ADC)
     {
-      auderr("I2S_TXDATAWIDTH failed.\n");
-      return ret;
+      ret = I2S_TXDATAWIDTH(priv->i2s, priv->bpsamp);
+      if (ret < 0)
+        {
+          auderr("I2S_TXDATAWIDTH failed.\n");
+          return ret;
+        }
     }
 
   ret = 0;
@@ -682,21 +690,35 @@ static int es8311_setsamplerate(FAR struct es8311_dev_s *priv)
   int ret;
 
   /* Set the I2S rate first: MCLK follows it, and the codec's clock
-   * dividers depend on both
+   * dividers depend on both.
+   *
+   * Only for the directions this instance uses.  A board may register
+   * the codec twice on one I2S bus, an output and an input instance, and
+   * an I2S setter may stop and restart its channel (Espressif's do): a
+   * transfer the other instance had in flight there would never
+   * complete, and that instance's stop would wait for it for ever
+   * (es8311_reset() sets the rate when a worker ends, so stopping
+   * playback during a recording did it).
    */
 
-  ret = I2S_RXSAMPLERATE(priv->i2s, priv->samprate);
-  if (ret < 0)
+  if (priv->audio_mode != ES_MODULE_DAC)
     {
-      auderr("I2S_RXSAMPLERATE failed.\n");
-      return ret;
+      ret = I2S_RXSAMPLERATE(priv->i2s, priv->samprate);
+      if (ret < 0)
+        {
+          auderr("I2S_RXSAMPLERATE failed.\n");
+          return ret;
+        }
     }
 
-  ret = I2S_TXSAMPLERATE(priv->i2s, priv->samprate);
-  if (ret < 0)
+  if (priv->audio_mode != ES_MODULE_ADC)
     {
-      auderr("I2S_TXSAMPLERATE failed.\n");
-      return ret;
+      ret = I2S_TXSAMPLERATE(priv->i2s, priv->samprate);
+      if (ret < 0)
+        {
+          auderr("I2S_TXSAMPLERATE failed.\n");
+          return ret;
+        }
     }
 
   priv->mclk = I2S_GETMCLKFREQUENCY(priv->i2s);
@@ -1169,6 +1191,7 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
         break;
     }
 
+  priv->dirty = true;
   return ret;
 }
 
@@ -1196,9 +1219,22 @@ static int es8311_shutdown(FAR struct audio_lowerhalf_s *dev)
 
   /* Now issue a software reset. This puts all ES8311 registers back in
    * their default state.
+   *
+   * Only if this instance has configured or started the codec since the
+   * last reset.  A board may register the codec twice, an output and an
+   * input instance, and the other may be streaming: a reset would stop
+   * its audio and, run by an instance that never configured its own
+   * direction (every instance is an output after es8311_initialize()),
+   * set the other's I2S direction and hang its stop (see
+   * es8311_setsamplerate()).  Opening and closing a device only to query
+   * it did that.
    */
 
-  es8311_reset(priv);
+  if (priv->dirty)
+    {
+      es8311_reset(priv);
+    }
+
   return OK;
 }
 
@@ -1518,6 +1554,8 @@ static int es8311_start(FAR struct audio_lowerhalf_s *dev)
       auderr("The codec ES8311 doesn't support ES_MODULE_LINE mode");
       return -EINVAL;
     }
+
+  priv->dirty = true;
 
   if (priv->audio_mode == ES_MODULE_ADC ||
       priv->audio_mode == ES_MODULE_ADC_DAC)
@@ -2323,6 +2361,7 @@ static void es8311_reset(FAR struct es8311_dev_s *priv)
    */
 
   es8311_writereg(priv, ES8311_RESET_REG00, ES8311_REG00_IDLE);
+  priv->dirty = false;
 
   es8311_dump_registers(&priv->dev, "After reset");
   audinfo("ES8311 reset complete.\n");
