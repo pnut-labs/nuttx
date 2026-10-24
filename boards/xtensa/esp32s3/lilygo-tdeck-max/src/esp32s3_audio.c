@@ -30,11 +30,11 @@
  * microphone is an analog electret on MIC1P/MIC1N, biased from ADCVREF.
  *
  * Playback is /dev/audio/pcm0, through NuttX's PCM decoder (which in raw
- * mode, AUDIO_FORMAT_RAW, passes raw PCM through and does not parse WAV
- * headers); recording is /dev/audio/pcm_in0.  Both are the same codec,
- * set up twice: use one at a time.  The amplifier is switched on while the
- * output is reserved by a player.  I2S stops in light sleep, so the chip
- * stays out of it while either device is reserved.
+ * mode, AUDIO_FORMAT_RAW, plays raw PCM as configured, and a WAV file as
+ * its header says); recording is /dev/audio/pcm_in0.  Both are the same
+ * codec, set up twice: use one at a time.  The amplifier is switched on
+ * while the output is reserved by a player.  I2S stops in light sleep, so
+ * the chip stays out of it while either device is reserved.
  ****************************************************************************/
 
 /****************************************************************************

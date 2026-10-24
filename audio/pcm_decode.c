@@ -109,11 +109,9 @@ static void pcm_dump(FAR const struct wav_header_s *wav);
 #  define pcm_dump(w)
 #endif
 
-#ifndef CONFIG_AUDIO_FORMAT_RAW
 static inline bool pcm_validwav(FAR const struct wav_header_s *wav);
 static ssize_t pcm_parsewav(FAR struct pcm_decode_s *priv, uint8_t *data,
                             apb_samp_t len);
-#endif
 
 #ifndef CONFIG_AUDIO_EXCLUDE_FFORWARD
 static void pcm_subsample_configure(FAR struct pcm_decode_s *priv,
@@ -253,7 +251,6 @@ static void pcm_dump(FAR const struct wav_header_s *wav)
  *
  ****************************************************************************/
 
-#ifndef CONFIG_AUDIO_FORMAT_RAW
 static uint16_t pcm_leuint16(FAR const uint16_t *ptr)
 {
   FAR const uint8_t *p = (FAR const uint8_t *)ptr;
@@ -319,9 +316,14 @@ static ssize_t pcm_parsewav(FAR struct pcm_decode_s *priv, uint8_t *data,
   struct wav_header_s localwav;
   size_t ret = sizeof(struct wav_header_s);
 
-  if (len < sizeof(struct wav_header_s))
+  /* Not a WAV file at all: raw samples, perhaps, too short to hold the
+   * RIFF header or not starting with it, whose bytes must not be taken for
+   * chunk lengths below
+   */
+
+  if (len < sizeof(struct wav_hdrchunk_s))
     {
-      return -EINVAL;
+      return -ENOENT;
     }
 
   /* Transfer the purported WAV file header into our stack storage,
@@ -331,6 +333,21 @@ static ssize_t pcm_parsewav(FAR struct pcm_decode_s *priv, uint8_t *data,
   localwav.hdr.chunkid   = pcm_leuint32(&wav->hdr.chunkid);
   localwav.hdr.chunklen  = pcm_leuint32(&wav->hdr.chunklen);
   localwav.hdr.format    = pcm_leuint32(&wav->hdr.format);
+
+  if (localwav.hdr.chunkid != WAV_HDR_CHUNKID ||
+      localwav.hdr.format != WAV_HDR_FORMAT)
+    {
+      return -ENOENT;
+    }
+
+  /* A WAV file whose header the first buffer does not hold whole: there is
+   * no attempt to reconstruct it from several buffers
+   */
+
+  if (len < sizeof(struct wav_header_s))
+    {
+      return -EINVAL;
+    }
 
   localwav.fmt.chunkid   = pcm_leuint32(&wav->fmt.chunkid);
   localwav.fmt.chunklen  = pcm_leuint32(&wav->fmt.chunklen);
@@ -359,15 +376,16 @@ static ssize_t pcm_parsewav(FAR struct pcm_decode_s *priv, uint8_t *data,
           break;
         }
 
-      /* Not data chunk. Skip it. */
+      /* Not data chunk. Skip it, unless its length goes past the buffer */
 
-      ret += localwav.data.chunklen + 8;
-      if (ret >= len)
+      if ((uint64_t)ret + localwav.data.chunklen + 8 >= len)
         {
           /* Data chunk not found */
 
           return -EINVAL;
         }
+
+      ret += localwav.data.chunklen + 8;
 
       dchunk = (FAR const struct wav_datachunk_s *)
                ((uintptr_t)dchunk + localwav.data.chunklen + 8);
@@ -423,7 +441,6 @@ static ssize_t pcm_parsewav(FAR struct pcm_decode_s *priv, uint8_t *data,
 
   return ret;
 }
-#endif
 
 /****************************************************************************
  * Name: pcm_subsample_configure
@@ -493,7 +510,7 @@ static void pcm_subsample_configure(FAR struct pcm_decode_s *priv,
        * next audio buffer that we receive.
        */
 
-       priv->subsample = subsample;
+      priv->subsample = subsample;
     }
 }
 #endif
@@ -1034,6 +1051,7 @@ static int pcm_enqueuebuffer(FAR struct audio_lowerhalf_s *dev,
   FAR struct pcm_decode_s *priv = (FAR struct pcm_decode_s *)dev;
   FAR struct audio_lowerhalf_s *lower;
   apb_samp_t bytesleft;
+  ssize_t headersize;
   int ret;
 
   DEBUGASSERT(priv);
@@ -1074,24 +1092,41 @@ static int pcm_enqueuebuffer(FAR struct audio_lowerhalf_s *dev,
       return lower->ops->enqueuebuffer(lower, apb);
     }
 
-  /* No.. then this must be the first buffer that we have seen (since we
-   * will error out out if the first buffer is smaller than the WAV file
-   * header.  There is no attempt to reconstruct the full header from
-   * fragments in multiple, tiny audio buffers).
+  /* No.. then this must be the first buffer that we have seen (a WAV
+   * file's first buffer must hold its whole header: there is no attempt to
+   * reconstruct it from fragments in multiple, tiny audio buffers).
    */
 
   bytesleft = apb->nbytes - apb->curbyte;
   audinfo("curbyte=%d nbytes=%d nmaxbytes=%d bytesleft=%d\n",
           apb->curbyte, apb->nbytes, apb->nmaxbytes, bytesleft);
 
-  /* Parse and verify the candidate PCM WAV file header */
+  /* Parse and verify the candidate PCM WAV file header.  Without raw
+   * support only a WAV file plays; with it, a stream that starts with a WAV
+   * header plays as that header says, and any other as the device was
+   * configured (AUDIOIOC_CONFIGURE).
+   */
 
-#ifndef CONFIG_AUDIO_FORMAT_RAW
-  ssize_t headersize = pcm_parsewav(priv, &apb->samp[apb->curbyte],
-                                    bytesleft);
+  headersize = pcm_parsewav(priv, &apb->samp[apb->curbyte], bytesleft);
+#ifdef CONFIG_AUDIO_FORMAT_RAW
+  if (headersize == -ENOENT)
+    {
+      headersize = 0;
+    }
+#endif
+
+  if (headersize < 0)
+    {
+      /* This is not a WAV file! */
+
+      auderr("ERROR: Invalid PCM WAV file\n");
+      return -EINVAL;
+    }
+
   if (headersize > 0)
     {
       struct audio_caps_s caps;
+
       memset(&caps, 0, sizeof(caps));
 
       /* Configure the lower level for the number of channels, bitrate,
@@ -1121,61 +1156,53 @@ static int pcm_enqueuebuffer(FAR struct audio_lowerhalf_s *dev,
       /* Bump up the data offset */
 
       apb->curbyte += headersize;
-#endif
-#ifndef CONFIG_AUDIO_EXCLUDE_FFORWARD
-      audinfo("Begin streaming: apb=%p curbyte=%d nbytes=%d\n",
-              apb, apb->curbyte, apb->nbytes);
-
-      /* Perform any necessary sub-sampling operations */
-
-      pcm_subsample(priv, apb);
-#endif
-
-      /* Then give the audio buffer to the lower driver */
-
-      audinfo(
-           "Pass to lower enqueuebuffer: apb=%p curbyte=%d nbytes=%d\n",
-            apb, apb->curbyte, apb->nbytes);
-
-      ret = lower->ops->enqueuebuffer(lower, apb);
-      if (ret == OK)
-        {
-          /* Now we are streaming.  Unless for some reason there is only
-           * one audio buffer in the audio stream.  In that case, this
-           * will be marked as the final buffer
-           */
-
-          priv->streaming = ((apb->flags & AUDIO_APB_FINAL) == 0);
-          return OK;
-        }
-
-      /* The normal protocol for streaming errors is as follows:
-       *
-       * (1) Fail the enqueueing by returned a negated error value.  The
-       *     upper level then knows that this buffer was not queue.
-       * (2) Return all queued buffers to the caller using the
-       *     AUDIO_CALLBACK_DEQUEUE callback
-       * (3) Terminate playing using the AUDIO_CALLBACK_COMPLETE
-       *     callback.
-       *
-       * In this case we fail on the very first buffer and we need only
-       * do (1) and (3).
-       */
-
-#ifdef CONFIG_AUDIO_MULTI_SESSION
-      priv->export.upper(priv->export.priv, AUDIO_CALLBACK_COMPLETE,
-                         NULL, OK, NULL);
-#else
-      priv->export.upper(priv->export.priv, AUDIO_CALLBACK_COMPLETE,
-                         NULL, OK);
-#endif
-
-#ifndef CONFIG_AUDIO_FORMAT_RAW
     }
 
-  /* This is not a WAV file! */
+#ifndef CONFIG_AUDIO_EXCLUDE_FFORWARD
+  audinfo("Begin streaming: apb=%p curbyte=%d nbytes=%d\n",
+          apb, apb->curbyte, apb->nbytes);
 
-  auderr("ERROR: Invalid PCM WAV file\n");
+  /* Perform any necessary sub-sampling operations */
+
+  pcm_subsample(priv, apb);
+#endif
+
+  /* Then give the audio buffer to the lower driver */
+
+  audinfo("Pass to lower enqueuebuffer: apb=%p curbyte=%d nbytes=%d\n",
+          apb, apb->curbyte, apb->nbytes);
+
+  ret = lower->ops->enqueuebuffer(lower, apb);
+  if (ret == OK)
+    {
+      /* Now we are streaming.  Unless for some reason there is only one
+       * audio buffer in the audio stream.  In that case, this will be
+       * marked as the final buffer
+       */
+
+      priv->streaming = ((apb->flags & AUDIO_APB_FINAL) == 0);
+      return OK;
+    }
+
+  /* The normal protocol for streaming errors is as follows:
+   *
+   * (1) Fail the enqueueing by returned a negated error value.  The
+   *     upper level then knows that this buffer was not queue.
+   * (2) Return all queued buffers to the caller using the
+   *     AUDIO_CALLBACK_DEQUEUE callback
+   * (3) Terminate playing using the AUDIO_CALLBACK_COMPLETE
+   *     callback.
+   *
+   * In this case we fail on the very first buffer and we need only
+   * do (1) and (3).
+   */
+
+#ifdef CONFIG_AUDIO_MULTI_SESSION
+  priv->export.upper(priv->export.priv, AUDIO_CALLBACK_COMPLETE,
+                     NULL, OK, NULL);
+#else
+  priv->export.upper(priv->export.priv, AUDIO_CALLBACK_COMPLETE,
+                     NULL, OK);
 #endif
 
   return -EINVAL;

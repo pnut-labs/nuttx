@@ -92,9 +92,11 @@ config AUDIO_FORMAT_RAW
 	bool "Raw mode"
 	default n
 	---help---
-		Raw mode makes the PCM decoder skip trying to parse received
-		data for a PCM header. All data is sent to the audio driver
-		directly.
+		Raw mode makes the PCM decoder accept data with no WAV header:
+		it is sent to the audio driver as it is, in the format the
+		device was configured for (AUDIOIOC_CONFIGURE).  Data that
+		starts with a WAV header still configures the device from it,
+		and the header is skipped.
 
 endif
 
