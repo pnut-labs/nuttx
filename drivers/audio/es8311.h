@@ -164,6 +164,7 @@ struct es8311_dev_s
   bool                                terminating;      /* True: Stop requested */
 #endif
   bool                                reserved;         /* True: Device is reserved */
+  bool                                dirty;            /* True: Configured or started since the last reset */
   volatile int                        result;           /* The result of the last transfer */
   es_module_e                         audio_mode;       /* The current audio mode of the ES8311 chip */
   es_mic_gain_e                       mic_gain;         /* The current microphone gain */

@@ -1191,6 +1191,7 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
         break;
     }
 
+  priv->dirty = true;
   return ret;
 }
 
@@ -1218,9 +1219,22 @@ static int es8311_shutdown(FAR struct audio_lowerhalf_s *dev)
 
   /* Now issue a software reset. This puts all ES8311 registers back in
    * their default state.
+   *
+   * Only if this instance has configured or started the codec since the
+   * last reset.  A board may register the codec twice, an output and an
+   * input instance, and the other may be streaming: a reset would stop
+   * its audio and, run by an instance that never configured its own
+   * direction (every instance is an output after es8311_initialize()),
+   * set the other's I2S direction and hang its stop (see
+   * es8311_setsamplerate()).  Opening and closing a device only to query
+   * it did that.
    */
 
-  es8311_reset(priv);
+  if (priv->dirty)
+    {
+      es8311_reset(priv);
+    }
+
   return OK;
 }
 
@@ -1540,6 +1554,8 @@ static int es8311_start(FAR struct audio_lowerhalf_s *dev)
       auderr("The codec ES8311 doesn't support ES_MODULE_LINE mode");
       return -EINVAL;
     }
+
+  priv->dirty = true;
 
   if (priv->audio_mode == ES_MODULE_ADC ||
       priv->audio_mode == ES_MODULE_ADC_DAC)
@@ -2345,6 +2361,7 @@ static void es8311_reset(FAR struct es8311_dev_s *priv)
    */
 
   es8311_writereg(priv, ES8311_RESET_REG00, ES8311_REG00_IDLE);
+  priv->dirty = false;
 
   es8311_dump_registers(&priv->dev, "After reset");
   audinfo("ES8311 reset complete.\n");
