@@ -615,18 +615,26 @@ static int es8311_setbitspersample(FAR struct es8311_dev_s *priv)
         return -EINVAL;
     }
 
-  ret = I2S_RXDATAWIDTH(priv->i2s, priv->bpsamp);
-  if (ret < 0)
+  /* Only the directions this instance uses: see es8311_setsamplerate() */
+
+  if (priv->audio_mode != ES_MODULE_DAC)
     {
-      auderr("I2S_RXDATAWIDTH failed.\n");
-      return ret;
+      ret = I2S_RXDATAWIDTH(priv->i2s, priv->bpsamp);
+      if (ret < 0)
+        {
+          auderr("I2S_RXDATAWIDTH failed.\n");
+          return ret;
+        }
     }
 
-  ret = I2S_TXDATAWIDTH(priv->i2s, priv->bpsamp);
-  if (ret < 0)
+  if (priv->audio_mode != ES_MODULE_ADC)
     {
-      auderr("I2S_TXDATAWIDTH failed.\n");
-      return ret;
+      ret = I2S_TXDATAWIDTH(priv->i2s, priv->bpsamp);
+      if (ret < 0)
+        {
+          auderr("I2S_TXDATAWIDTH failed.\n");
+          return ret;
+        }
     }
 
   ret = 0;
@@ -682,21 +690,35 @@ static int es8311_setsamplerate(FAR struct es8311_dev_s *priv)
   int ret;
 
   /* Set the I2S rate first: MCLK follows it, and the codec's clock
-   * dividers depend on both
+   * dividers depend on both.
+   *
+   * Only for the directions this instance uses.  A board may register
+   * the codec twice on one I2S bus, an output and an input instance, and
+   * an I2S setter may stop and restart its channel (Espressif's do): a
+   * transfer the other instance had in flight there would never
+   * complete, and that instance's stop would wait for it for ever
+   * (es8311_reset() sets the rate when a worker ends, so stopping
+   * playback during a recording did it).
    */
 
-  ret = I2S_RXSAMPLERATE(priv->i2s, priv->samprate);
-  if (ret < 0)
+  if (priv->audio_mode != ES_MODULE_DAC)
     {
-      auderr("I2S_RXSAMPLERATE failed.\n");
-      return ret;
+      ret = I2S_RXSAMPLERATE(priv->i2s, priv->samprate);
+      if (ret < 0)
+        {
+          auderr("I2S_RXSAMPLERATE failed.\n");
+          return ret;
+        }
     }
 
-  ret = I2S_TXSAMPLERATE(priv->i2s, priv->samprate);
-  if (ret < 0)
+  if (priv->audio_mode != ES_MODULE_ADC)
     {
-      auderr("I2S_TXSAMPLERATE failed.\n");
-      return ret;
+      ret = I2S_TXSAMPLERATE(priv->i2s, priv->samprate);
+      if (ret < 0)
+        {
+          auderr("I2S_TXSAMPLERATE failed.\n");
+          return ret;
+        }
     }
 
   priv->mclk = I2S_GETMCLKFREQUENCY(priv->i2s);
