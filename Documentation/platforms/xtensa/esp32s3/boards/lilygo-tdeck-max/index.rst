@@ -737,6 +737,15 @@ it waits for an interrupt.
   the internal 150 kHz RC oscillator, which runs faster asleep than when
   it was calibrated.  The board has no 32 kHz crystal: its pins, GPIO 15
   and 16, are the keyboard's interrupt and the GNSS receiver's TX.
+* The time set last (``date``, ``clock_settime()``) is kept across a
+  software reset (``reboot``) and a reset over USB, measured within a
+  second or two; a main-watchdog reset should keep it too.  It is not
+  kept across a power-on, a brown-out that resets the chip, or an
+  RTC-watchdog reset: those clear the RTC's registers and its counter,
+  and the clock then starts at the counter's count, early 1970.
+  ``full`` has the RTC driver, which keeps the boot time in the RTC's
+  registers, against its counter, which goes on counting through a
+  reset of the cores.
 
 To measure from the cell with the cable attached, cut the charger's
 input (``EN_HIZ``, bit 7 of its register 0), read the gauge's current in
@@ -808,7 +817,7 @@ command), the IMU (the uORB topics ``sensor_accel0`` and ``sensor_gyro0``,
 the ``sensortest`` command), Wi-Fi and Bluetooth LE (``/dev/wifi_en``,
 ``/dev/ble_en``, the ``wapi``, ``ping`` and ``bt`` commands), power
 management (light sleep, frequency scaling, ``/proc/pm``, ``/dev/awake``,
-``pmconfig``), and
+``pmconfig``), the RTC (``/dev/rtc0``, the ``date`` command), and
 the system log in a 4 KB RAM log (``dmesg``).
 The RAM log is not cleared by a reset, so the dump of a crash is still
 there after the board restarts; each start is marked with its reset
