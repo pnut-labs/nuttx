@@ -641,6 +641,31 @@ static int esp_rtc_rdalarm(struct rtc_lowerhalf_s *lower,
 #endif /* CONFIG_RTC_DRIVER && CONFIG_RTC_ALARM */
 
 /****************************************************************************
+ * Name: esp_rtc_synchronize
+ *
+ * Description:
+ *   Set the system clock to the RTC's time, to the microsecond.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_RTC_DRIVER) && !defined(CONFIG_RTC_HIRES)
+static void esp_rtc_synchronize(void)
+{
+  struct timespec ts;
+  uint64_t time_us;
+  irqstate_t flags;
+
+  flags = spin_lock_irqsave(&g_rtc_lowerhalf.lock);
+  time_us = esp_rtc_get_time_us() + esp_rtc_get_boot_time();
+  spin_unlock_irqrestore(&g_rtc_lowerhalf.lock, flags);
+
+  ts.tv_sec  = time_us / USEC_PER_SEC;
+  ts.tv_nsec = (time_us % USEC_PER_SEC) * NSEC_PER_USEC;
+  clock_synchronize(&ts);
+}
+#endif
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -896,6 +921,15 @@ int esp_rtc_driverinit(void)
   /* Get the time difference between HR Timer and RTC */
 
   g_rtc_save->offset = esp_rtc_get_time_us() - esp_hr_timer_time_us();
+
+#ifndef CONFIG_RTC_HIRES
+  /* clock_initialize() took the time from up_rtc_time(), in whole
+   * seconds, so the system clock starts up to a second slow at every
+   * reset.  Set it to the microsecond, as the RTC keeps it.
+   */
+
+  esp_rtc_synchronize();
+#endif
 
   return ret;
 }
