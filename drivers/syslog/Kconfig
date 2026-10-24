@@ -368,6 +368,17 @@ config RAMLOG_BUFSIZE
 	---help---
 		Size of the console RAM log.  Default: 1024
 
+config RAMLOG_CLEAN_DCACHE
+	bool "Write the RAM log back from the data cache at once"
+	default n
+	depends on ARCH_DCACHE
+	---help---
+		For a RAM log in cached memory that a reset keeps, external RAM
+		with RAMLOG_BUFFER_SECTION: each write to it is written back to
+		the memory at once, so that its lines are there after a reset
+		that does not write the cache back itself, one from a debugger,
+		a USB serial adapter or a watchdog.
+
 endif # RAMLOG_SYSLOG
 
 if SYSLOG_RPMSG

@@ -754,14 +754,16 @@ SECTIONS
    * Because to `extern_ram_seg` and `drom0_0_seg` are on the same bus
    */
 
-#ifdef CONFIG_XTENSA_EXTMEM_BSS
+#if defined(CONFIG_XTENSA_EXTMEM_BSS) || defined(CONFIG_ESP32S3_SPIRAM_NOINIT)
   .ext_ram.dummy (NOLOAD):
   {
     . = ORIGIN(extern_ram_seg);
     . = . + (_rodata_reserved_end - _flash_rodata_dummy_start);
     . = ALIGN (0x10000);
   } > extern_ram_seg
+#endif
 
+#ifdef CONFIG_XTENSA_EXTMEM_BSS
   /* This section holds .ext_ram.bss data, and will be put in PSRAM */
 
   .ext_ram.bss (NOLOAD) :
@@ -778,6 +780,21 @@ SECTIONS
     *libpython3.13.a:(.bss .bss.*)
     . = ALIGN(4);
     _ext_ram_bss_end = ABSOLUTE(.);
+  } > extern_ram_seg
+#endif
+
+#ifdef CONFIG_ESP32S3_SPIRAM_NOINIT
+  /* Data in PSRAM that start-up leaves as it was, so that it survives a
+   * software reset: after .ext_ram.bss, which start-up clears
+   */
+
+  .ext_ram.noinit (NOLOAD) :
+  {
+    . = ALIGN(4);
+    _ext_ram_noinit_start = ABSOLUTE(.);
+    *(.ext_ram.noinit .ext_ram.noinit.*)
+    . = ALIGN(4);
+    _ext_ram_noinit_end = ABSOLUTE(.);
   } > extern_ram_seg
 #endif
 

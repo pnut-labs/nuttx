@@ -128,6 +128,11 @@ extern uint8_t _ext_ram_bss_start;
 extern uint8_t _ext_ram_bss_end;
 #endif
 
+#ifdef CONFIG_ESP32S3_SPIRAM_NOINIT
+extern uint8_t _ext_ram_noinit_start;
+extern uint8_t _ext_ram_noinit_end;
+#endif
+
 /****************************************************************************
  * ROM Function Prototypes
  ****************************************************************************/
@@ -232,6 +237,7 @@ static inline bool mmu_check_valid_ext_vaddr_region(uint32_t vaddr_start,
                 SOC_ADDRESS_IN_IRAM0_CACHE(vaddr_end)) |
                (SOC_ADDRESS_IN_DRAM0_CACHE(vaddr_start) &&
                 SOC_ADDRESS_IN_DRAM0_CACHE(vaddr_end));
+
   return valid;
 }
 
@@ -264,8 +270,9 @@ static int IRAM_ATTR esp_mmu_map_region(uint32_t vaddr, uint32_t paddr,
   uint32_t entry_id;
   uint32_t page_num = (len + MMU_PAGE_SIZE - 1) / MMU_PAGE_SIZE;
   uint32_t ret = page_num * MMU_PAGE_SIZE;
-  mmu_val = paddr >> 16;
   bool write_back = false;
+
+  mmu_val = paddr >> 16;
 
   while (page_num)
     {
@@ -400,8 +407,9 @@ int IRAM_ATTR esp_spiram_init_cache(void)
   uint32_t target_mapped_vaddr_start;
   uint32_t target_mapped_vaddr_end;
   uint32_t ext_bss_size = 0;
+  int ret;
 
-  int ret = psram_get_available_size(&psram_size);
+  ret = psram_get_available_size(&psram_size);
   if (ret != OK)
     {
       abort();
@@ -488,11 +496,38 @@ int IRAM_ATTR esp_spiram_init_cache(void)
                   (intptr_t)&_ext_ram_bss_start);
 #endif
 
+  /* The section kept across a reset follows .ext_ram.bss, if there is
+   * one, where the linker put it, from the first address mapped: the heap
+   * starts after both
+   */
+
+#ifdef CONFIG_ESP32S3_SPIRAM_NOINIT
+  ASSERT((uintptr_t)&_ext_ram_noinit_start >= g_mapped_vaddr_start);
+  ASSERT((uintptr_t)&_ext_ram_noinit_end <=
+         g_mapped_vaddr_start + g_mapped_size);
+  ext_bss_size = (uintptr_t)&_ext_ram_noinit_end - g_mapped_vaddr_start;
+#endif
+
+  /* The reserved part is at the start of the mapping only: the heap goes
+   * on to its end
+   */
+
   g_allocable_vaddr_start = g_mapped_vaddr_start + ext_bss_size;
-  g_allocable_vaddr_end = g_mapped_vaddr_start + g_mapped_size -
-                          ext_bss_size;
+  g_allocable_vaddr_end = g_mapped_vaddr_start + g_mapped_size;
 
   return ret;
+}
+
+/* The memory test leaves the data kept across a reset alone */
+
+static bool esp_spiram_test_skip(volatile int *word)
+{
+#ifdef CONFIG_ESP32S3_SPIRAM_NOINIT
+  return (uintptr_t)word >= (uintptr_t)&_ext_ram_noinit_start &&
+         (uintptr_t)word < (uintptr_t)&_ext_ram_noinit_end;
+#else
+  return false;
+#endif
 }
 
 /* Simple RAM test. Writes a word every 32 bytes. Takes about a second
@@ -513,11 +548,21 @@ int esp_spiram_test(void)
 
   for (p = 0; p < (s / sizeof(int)); p += 8)
     {
+      if (esp_spiram_test_skip(&spiram[p]))
+        {
+          continue;
+        }
+
       spiram[p] = p ^ 0xaaaaaaaa;
     }
 
   for (p = 0; p < (s / sizeof(int)); p += 8)
     {
+      if (esp_spiram_test_skip(&spiram[p]))
+        {
+          continue;
+        }
+
       if (spiram[p] != (p ^ 0xaaaaaaaa))
         {
           errct++;
