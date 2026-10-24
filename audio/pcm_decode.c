@@ -316,9 +316,14 @@ static ssize_t pcm_parsewav(FAR struct pcm_decode_s *priv, uint8_t *data,
   struct wav_header_s localwav;
   size_t ret = sizeof(struct wav_header_s);
 
-  if (len < sizeof(struct wav_header_s))
+  /* Not a WAV file at all: raw samples, perhaps, too short to hold the
+   * RIFF header or not starting with it, whose bytes must not be taken for
+   * chunk lengths below
+   */
+
+  if (len < sizeof(struct wav_hdrchunk_s))
     {
-      return -EINVAL;
+      return -ENOENT;
     }
 
   /* Transfer the purported WAV file header into our stack storage,
@@ -329,14 +334,19 @@ static ssize_t pcm_parsewav(FAR struct pcm_decode_s *priv, uint8_t *data,
   localwav.hdr.chunklen  = pcm_leuint32(&wav->hdr.chunklen);
   localwav.hdr.format    = pcm_leuint32(&wav->hdr.format);
 
-  /* Not a WAV file at all: raw samples, perhaps, whose bytes must not be
-   * taken for chunk lengths below
-   */
-
   if (localwav.hdr.chunkid != WAV_HDR_CHUNKID ||
       localwav.hdr.format != WAV_HDR_FORMAT)
     {
       return -ENOENT;
+    }
+
+  /* A WAV file whose header the first buffer does not hold whole: there is
+   * no attempt to reconstruct it from several buffers
+   */
+
+  if (len < sizeof(struct wav_header_s))
+    {
+      return -EINVAL;
     }
 
   localwav.fmt.chunkid   = pcm_leuint32(&wav->fmt.chunkid);
@@ -1082,10 +1092,9 @@ static int pcm_enqueuebuffer(FAR struct audio_lowerhalf_s *dev,
       return lower->ops->enqueuebuffer(lower, apb);
     }
 
-  /* No.. then this must be the first buffer that we have seen (since we
-   * will error out out if the first buffer is smaller than the WAV file
-   * header.  There is no attempt to reconstruct the full header from
-   * fragments in multiple, tiny audio buffers).
+  /* No.. then this must be the first buffer that we have seen (a WAV
+   * file's first buffer must hold its whole header: there is no attempt to
+   * reconstruct it from fragments in multiple, tiny audio buffers).
    */
 
   bytesleft = apb->nbytes - apb->curbyte;
