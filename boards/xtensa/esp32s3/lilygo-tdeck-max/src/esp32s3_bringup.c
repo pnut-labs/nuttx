@@ -47,6 +47,10 @@
 #  include "esp32s3_board_sdmmc.h"
 #endif
 
+#ifdef CONFIG_RTC_DRIVER
+#  include "espressif/esp_rtc.h"
+#endif
+
 #include "esp32s3_reset_reasons.h"
 
 #include "lilygo-tdeck-max.h"
@@ -94,6 +98,16 @@ int esp32s3_bringup(void)
     {
       syslog(LOG_ERR, "ERROR: Failed to mount tmpfs at %s: %d\n",
              CONFIG_LIBC_TMPDIR, ret);
+    }
+#endif
+
+#ifdef CONFIG_RTC_DRIVER
+  /* The RTC, /dev/rtc0, which keeps the time set last across a reset */
+
+  ret = esp_rtc_driverinit();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to start the RTC driver: %d\n", ret);
     }
 #endif
 
