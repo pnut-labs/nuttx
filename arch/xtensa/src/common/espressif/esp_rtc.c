@@ -326,6 +326,7 @@ static int esp_rtc_rdtime(struct rtc_lowerhalf_s *lower,
   if (gmtime_r(&timer, (struct tm *)rtctime) == 0)
     {
       int errcode = get_errno();
+
       DEBUGASSERT(errcode > 0);
 
       rtcerr("gmtime_r failed: %d\n", errcode);
@@ -768,7 +769,7 @@ int up_rtc_gettime(struct timespec *tp)
 int up_rtc_settime(const struct timespec *ts)
 {
   uint64_t now_us;
-  uint64_t rtc_offset_us;
+  uint64_t rtc_us;
   irqstate_t flags;
 
   DEBUGASSERT(ts != NULL && ts->tv_nsec < NSEC_PER_SEC);
@@ -778,24 +779,22 @@ int up_rtc_settime(const struct timespec *ts)
   now_us = ts->tv_sec * USEC_PER_SEC +
           ts->tv_nsec / NSEC_PER_USEC;
 
+  /* The boot time is kept against the RTC controller's counter, which
+   * goes on counting across a reset, while the HR-Timer starts again from
+   * zero; the interval between them is taken afresh, so that both give
+   * the time just set.
+   */
+
+  rtc_us = esp_rtc_get_time_us();
+
 #ifdef CONFIG_RTC_DRIVER
   if (g_hr_timer_enabled)
     {
-      /* Set based on HR-Timer offset value */
-
-      rtc_offset_us = now_us - esp_hr_timer_time_us();
+      g_rtc_save->offset = rtc_us - esp_hr_timer_time_us();
     }
-  else
 #endif
-    {
-      /* Set based on the offset value of the RTC controller */
 
-      rtc_offset_us = now_us - esp_rtc_get_time_us();
-    }
-
-  g_rtc_save->offset = 0;
-
-  esp_rtc_set_boot_time(rtc_offset_us);
+  esp_rtc_set_boot_time(now_us - rtc_us);
 
   spin_unlock_irqrestore(&g_rtc_lowerhalf.lock, flags);
 
@@ -822,13 +821,19 @@ int up_rtc_initialize(void)
 {
   g_rtc_save = &g_rtc_saved_data;
 
-  /* If saved data is invalid, clear offset information */
+  /* If saved data is invalid, clear offset information, which
+   * esp_rtc_driverinit() sets anyway.  Whether or not the saved data
+   * survived, the boot time is not cleared here: it lives in RTC
+   * registers that keep their value across any reset short of one that
+   * reaches the RTC domain (power-on, a chip-level brown-out, an RTC or
+   * super watchdog), where they read zero, and it carries the time set
+   * last across a reset.
+   */
 
   if (g_rtc_save->magic != MAGIC_RTC_SAVE)
     {
       g_rtc_save->magic = MAGIC_RTC_SAVE;
       g_rtc_save->offset = 0;
-      esp_rtc_set_boot_time(0);
     }
 
 #ifdef CONFIG_RTC_HIRES
@@ -861,10 +866,11 @@ int up_rtc_initialize(void)
 int esp_rtc_driverinit(void)
 {
   struct rtc_lowerhalf_s *lower = (struct rtc_lowerhalf_s *)&g_rtc_lowerhalf;
+  int ret;
 
   /* Initialize RTC */
 
-  int ret = up_rtc_initialize();
+  ret = up_rtc_initialize();
   if (ret < 0)
     {
       return ret;
