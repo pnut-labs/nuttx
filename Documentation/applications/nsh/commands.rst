@@ -437,7 +437,7 @@ readable* format.
 
 **Command Syntax**::
 
-  dmesg
+  dmesg [-c|-C]
 
 **Synopsis**. This command can be used to dump (and clear) the
 content of any buffered syslog output messages. This command is
@@ -445,8 +445,9 @@ only available if ``CONFIG_RAMLOG_SYSLOG`` is enabled. In that
 case, syslog output will be collected in an in-memory, circular
 buffer. Entering the ``dmesg`` command will dump the content of
 that in-memory, circular buffer to the NSH console output.
-``dmesg`` has the side effect of clearing the buffered data so
-that entering ``dmesg`` again will show only newly buffered data.
+``dmesg -c`` dumps it and then clears it, so that entering ``dmesg``
+again will show only newly buffered data; ``dmesg -C`` clears it
+without dumping it.
 
 .. _cmddu:
 

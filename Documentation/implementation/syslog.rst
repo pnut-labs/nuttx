@@ -508,8 +508,14 @@ dmesg
 ^^^^^
 
 When the RAMLOG (with SYSLOG) is enabled, a new NuttShell (NSH) command
-will appear: ``dmesg``. The dmsg command will dump the contents of the
-circular buffer to the console (and also clear the circular buffer).
+will appear: ``dmesg``. The dmesg command will dump the contents of the
+circular buffer to the console; ``dmesg -c`` also clears it, and
+``dmesg -C`` only clears it.
+
+Each reader that opens the RAM log reads it from its oldest line, on its
+own.  ``SYSLOGIOC_CLEAR`` empties the buffer for every reader;
+``fsync()``, and ``sync()``, which syncs every task's open files, leave
+it as it is.
 
 RAMLOG Configuration options
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

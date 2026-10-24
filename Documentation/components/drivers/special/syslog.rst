@@ -544,6 +544,15 @@ Other miscellaneous settings
 -  ``CONFIG_RAMLOG_NPOLLWAITERS``: The maximum number of threads
    that may be waiting on the poll method.
 
+Clearing the RAMLOG
+-------------------
+
+``SYSLOGIOC_CLEAR`` empties the RAMLOG's buffer for every reader (NSH's
+``dmesg -c`` and ``dmesg -C``).  ``fsync()`` leaves it as it is, and so
+does ``sync()``, which syncs every task's open files and runs at every
+reset through ``boardctl()``.  ``BIOC_FLUSH``, which ``fsync()`` sends,
+used to clear it: a reset then wiped the lines kept across it.
+
 RAMLOG Rate Limiting
 --------------------
 
