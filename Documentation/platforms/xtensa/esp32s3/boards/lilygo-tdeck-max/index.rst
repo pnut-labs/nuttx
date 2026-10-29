@@ -732,10 +732,21 @@ it waits for an interrupt.
   the receiver is on).
 * During light sleep every pin keeps its configuration, outputs included,
   so inputs must not be left floating.
-* The clock gains about 0.85 % of the time slept: the sleep is timed by
-  the internal 150 kHz RC oscillator, which runs faster asleep than when
-  it was calibrated.  The board has no 32 kHz crystal: its pins, GPIO 15
+* The clock gains while the chip light-sleeps: the sleep is timed by the
+  internal RC oscillator, about 136 kHz, which runs faster asleep than
+  when it was calibrated.  With the sleeps of at most 2 s that the
+  board's poll for USB power allows, it gained 107 ppm of the time slept
+  (2026-10-29, 68 minutes asleep), wandering by some tens of ppm within
+  the hour, close to the +132 ppm of earlier firmware (2026-09-22).
+  Single sleeps of about 24 s gained about 0.85 % (2026-10-17); why they
+  differ is not known.  The board has no 32 kHz crystal: its pins, GPIO 15
   and 16, are the keyboard's interrupt and the GNSS receiver's TX.
+* ``BOARDCTL_SLEEP_RATE``, on in ``full``, corrects for it:
+  ``boardctl(BOARDIOC_SLEEP_RATE, ppb)`` gives the rate, in parts per
+  billion of the time slept, and each light sleep then moves the clock on
+  by the time slept less the rate's share.  Nothing is corrected until a
+  rate is given, after each start.  With +107000 ppb the clock gained
+  0.9 ppm (+-2.8) of the time slept over 44 minutes asleep (2026-10-29).
 * The time set last (``date``, ``clock_settime()``) is kept across a
   software reset (``reboot``) and a reset over USB, measured within a
   second or two; a main-watchdog reset should keep it too.  It is not

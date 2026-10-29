@@ -577,6 +577,14 @@ config ARCH_HAVE_RESET
 	bool
 	default n
 
+config ARCH_HAVE_SLEEP_RATE
+	bool
+	default n
+	---help---
+		The architecture corrects the time a sleep moves the system clock
+		on by, and lengthens a sleep, by the sleep clock's rate:
+		board_sleep_rate() (BOARDCTL_SLEEP_RATE).
+
 config ARCH_LDST_16BIT_NOT_ATOMIC
 	bool
 	default n

@@ -46,6 +46,10 @@
 #  endif
 #endif
 #include "esp_sleep.h"
+#ifdef CONFIG_BOARDCTL_SLEEP_RATE
+#  include "esp_timer.h"
+#  include "esp_private/esp_timer_private.h"
+#endif
 #include "soc/rtc.h"
 #include "soc/soc_caps.h"
 #include "esp_sleep_internal.h"
@@ -83,6 +87,16 @@
 #  define UART_WAIT_TIME_US 5000000
 #endif
 
+#ifdef CONFIG_BOARDCTL_SLEEP_RATE
+/* How much less than the sleep clock's rate a sleep asked for is
+ * lengthened by, in parts per billion: an error of the rate up to this
+ * ends a sleep early, not late.  The rate wandered by some tens of parts
+ * per million in an hour on the LilyGo T-Deck Max.
+ */
+
+#  define ESP_PM_SLEEP_MARGIN_PPB 50000
+#endif
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
@@ -111,6 +125,16 @@ const char *g_wakeup_reasons[] =
 static esp_sleep_wakeup_cause_t g_last_wakeup_reason =
                                   ESP_SLEEP_WAKEUP_UNDEFINED;
 static uint64_t g_last_wakeup_time = 0;
+
+#ifdef CONFIG_BOARDCTL_SLEEP_RATE
+/* The sleep clock's rate (board_sleep_rate()): parts per billion of the
+ * time slept that it gains; and what the last correction left below a
+ * microsecond, in billionths of one, carried to the next
+ */
+
+static volatile int32_t g_sleep_rate;
+static int64_t g_sleep_carry;
+#endif
 
 /****************************************************************************
  * Private Functions
@@ -617,9 +641,113 @@ static esp_err_t IRAM_ATTR esp_pm_light_sleep_exit_cb(int64_t sleep_time_us,
 }
 #endif /* CONFIG_ESPRESSIF_AUTO_SLEEP */
 
+#ifdef CONFIG_BOARDCTL_SLEEP_RATE
+/****************************************************************************
+ * Name: esp_pm_sleep_correct
+ *
+ * Description:
+ *   Take the sleep clock's error off the time a light sleep moved the
+ *   system timer on by, which the sleep clock counted.  What is left below
+ *   a microsecond is carried to the next sleep, so that many short sleeps
+ *   are corrected as one long one.  Called with interrupts off, on the
+ *   only CPU (ARCH_HAVE_SLEEP_RATE needs !SMP): nothing reads the clock
+ *   between the step and its correction.
+ *
+ * Input Parameters:
+ *   slept_us - How far the system timer moved over the sleep.
+ *
+ ****************************************************************************/
+
+static void esp_pm_sleep_correct(uint64_t slept_us)
+{
+  int32_t rate = g_sleep_rate;
+  int64_t part;
+  int64_t us;
+
+  if (rate == 0)
+    {
+      g_sleep_carry = 0;
+      return;
+    }
+
+  /* slept_us * rate / 10^9, without overflow: the rate is at most 10^8 */
+
+  part = (int64_t)(slept_us % 1000000000) * rate + g_sleep_carry;
+  us   = (int64_t)(slept_us / 1000000000) * rate + part / 1000000000;
+  g_sleep_carry = part % 1000000000;
+
+  /* A negative advance is a step back: the counter takes it modulo 2^64
+   * (systimer_hal_counter_value_advance(), 16 ticks a microsecond)
+   */
+
+  if (us != 0)
+    {
+      esp_timer_private_advance(-us);
+    }
+}
+
+/****************************************************************************
+ * Name: esp_pm_sleep_stretch
+ *
+ * Description:
+ *   The sleep clock also times the wake-up: lengthen a sleep asked for by
+ *   its rate, less ESP_PM_SLEEP_MARGIN_PPB, so that it ends just before the
+ *   time asked in true time, rather than well before it; and not late
+ *   while the rate given is no more than the margin above the true one.
+ *   (The stretch and the correction together leave the clock rate^2 of
+ *   the time slept early: on the safe side too.)
+ *
+ * Input Parameters:
+ *   us - The sleep asked for, in microseconds of true time.
+ *
+ * Returned Value:
+ *   The sleep to ask the sleep clock for.
+ *
+ ****************************************************************************/
+
+static uint64_t esp_pm_sleep_stretch(uint64_t us)
+{
+  int32_t rate = g_sleep_rate;
+
+  if (rate == 0)
+    {
+      return us;
+    }
+
+  rate -= ESP_PM_SLEEP_MARGIN_PPB;
+  return us + (int64_t)(us / 1000000000) * rate +
+         (int64_t)(us % 1000000000) * rate / 1000000000;
+}
+#endif
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+#ifdef CONFIG_BOARDCTL_SLEEP_RATE
+/****************************************************************************
+ * Name: board_sleep_rate
+ *
+ * Description:
+ *   See include/nuttx/board.h.  A light sleep's length is the RTC slow
+ *   clock's count of it, as calibrated awake, and so is its wake-up's: the
+ *   rate corrects the first after the HAL has moved the system timer on,
+ *   and stretches the second, and leaves the calibration, which the
+ *   radios' drivers also read, alone.  At most 10 %.
+ *
+ ****************************************************************************/
+
+int board_sleep_rate(int32_t ppb)
+{
+  if (ppb < -100000000 || ppb > 100000000)
+    {
+      return -EINVAL;
+    }
+
+  g_sleep_rate = ppb;
+  return OK;
+}
+#endif
 
 /****************************************************************************
  * Name: esp_pm_wakeup_set_last_reason
@@ -754,6 +882,10 @@ void esp_pmstandby(uint64_t time_in_us)
 {
   uint64_t rtc_diff_us;
   esp_sleep_wakeup_cause_t cause;
+#ifdef CONFIG_BOARDCTL_SLEEP_RATE
+  uint64_t before;
+  int ret;
+#endif
 #ifdef CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND
   static bool pins_kept;
 #endif
@@ -796,9 +928,25 @@ void esp_pmstandby(uint64_t time_in_us)
   esp_pm_uart_wakeup_prepare();
 #endif /* CONFIG_PM_UART_WAKEUP */
 
+#ifdef CONFIG_BOARDCTL_SLEEP_RATE
+  esp_pm_sleep_enable_timer_wakeup(esp_pm_sleep_stretch(time_in_us));
+#else
   esp_pm_sleep_enable_timer_wakeup(time_in_us);
+#endif
 
+#ifdef CONFIG_BOARDCTL_SLEEP_RATE
+  before = esp_timer_get_time();
+  ret    = esp_pm_light_sleep_start(&rtc_diff_us);
+
+  /* The HAL moves the system timer on only after a sleep */
+
+  if (ret == OK)
+    {
+      esp_pm_sleep_correct(esp_timer_get_time() - before);
+    }
+#else
   esp_pm_light_sleep_start(&rtc_diff_us);
+#endif
 
   /* Only step the clock where the systimer actually stalls during sleep
    * (SOC_SLEEP_SYSTIMER_STALL_WORKAROUND); elsewhere it keeps counting
