@@ -179,6 +179,16 @@
  * ARG:           A pointer to an instance of struct boardioc_reset_cause_s
  * CONFIGURATION: CONFIG_BOARDCTL_RESET_CAUSE
  * DEPENDENCIES:  Board logic must provide the board_reset_cause() interface.
+ *
+ * CMD:           BOARDIOC_SLEEP_RATE
+ * DESCRIPTION:   Set how fast the clock that times a sleep runs: the time a
+ *                sleep moves the system clock on by is corrected by it,
+ *                and a sleep is lengthened by it
+ * ARG:           The rate, as an int32_t: parts per billion of the time
+ *                slept that the clock gains (positive) or loses (negative)
+ * CONFIGURATION: CONFIG_BOARDCTL_SLEEP_RATE
+ * DEPENDENCIES:  Architecture logic must provide the board_sleep_rate()
+ *                interface.
  */
 
 #define BOARDIOC_FINALINIT         _BOARDIOC(0x0001)
@@ -204,6 +214,7 @@
 #define BOARDIOC_IRQ_AFFINITY      _BOARDIOC(0x0015)
 #define BOARDIOC_START_CPU         _BOARDIOC(0x0016)
 #define BOARDIOC_MACADDR           _BOARDIOC(0x0017)
+#define BOARDIOC_SLEEP_RATE        _BOARDIOC(0x0018)
 
 /* If CONFIG_BOARDCTL_IOCTL=y, then board-specific commands will be support.
  * In this case, all commands not recognized by boardctl() will be forwarded

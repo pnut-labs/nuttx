@@ -5810,6 +5810,19 @@ config BOARDCTL_MACADDR
 		Architecture specific logic must provide the board_macaddr()
 		interface.
 
+config BOARDCTL_SLEEP_RATE
+	bool "Correct the time slept by the sleep clock's rate"
+	default n
+	depends on ARCH_HAVE_SLEEP_RATE && PM
+	---help---
+		Enables support for the BOARDIOC_SLEEP_RATE boardctl() command:
+		a program that measures how fast the clock that times the
+		processor's sleeps runs, against a time source, has the time a
+		sleep moves the system clock on by corrected, and a sleep
+		lengthened so that it ends by the time the next timer is due.
+		Architecture specific logic must provide the
+		board_sleep_rate() interface.
+
 config BOARDCTL_IOCTL
 	bool "Board-specific boardctl() commands"
 	default n

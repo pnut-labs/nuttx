@@ -959,6 +959,23 @@ int boardctl(unsigned int cmd, uintptr_t arg)
         break;
 #endif
 
+#ifdef CONFIG_BOARDCTL_SLEEP_RATE
+      /* CMD:           BOARDIOC_SLEEP_RATE
+       * DESCRIPTION:   Set how fast the clock that times a sleep runs, to
+       *                correct the time slept and lengthen a sleep by
+       * ARG:           The rate, parts per billion of the time slept
+       *                gained, as an int32_t
+       * CONFIGURATION: CONFIG_BOARDCTL_SLEEP_RATE
+       * DEPENDENCIES:  Architecture logic must provide board_sleep_rate()
+       */
+
+      case BOARDIOC_SLEEP_RATE:
+        {
+          ret = board_sleep_rate((int32_t)arg);
+        }
+        break;
+#endif
+
       default:
         {
 #ifdef CONFIG_BOARDCTL_IOCTL

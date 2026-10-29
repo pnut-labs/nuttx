@@ -82,6 +82,24 @@ Power Management
 
    :configuration: CONFIG_PM
 
+.. c:macro:: BOARDIOC_SLEEP_RATE
+
+   Set how fast the clock that times the processor's sleeps runs, against
+   true time.  From the next sleep on, the time a sleep moves the system
+   clock on by is corrected by it, so that the system clock and the timers
+   keep true time across sleeps, and a sleep is lengthened by it, so that
+   it ends by the time the next timer is due.  A program measures the
+   rate against a time source.
+
+   :Argument: The rate, as an ``int32_t``: parts per billion of the time
+     slept that the clock gains (positive) or loses (negative); 0 corrects
+     nothing.
+
+   :configuration: CONFIG_BOARDCTL_SLEEP_RATE
+
+   :dependencies: Architecture logic must provide the
+     :c:func:`board_sleep_rate` interface.
+
 Board information
 -----------------
 

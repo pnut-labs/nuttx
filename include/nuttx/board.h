@@ -633,6 +633,30 @@ int board_macaddr(FAR const char *ifname, FAR uint8_t *macaddr);
 #endif
 
 /****************************************************************************
+ * Name: board_sleep_rate
+ *
+ * Description:
+ *   Set how fast the clock that times a sleep runs, against true time.
+ *   The time a sleep moves the system clock on by is corrected by it from
+ *   the next sleep on, so that the system clock, and the timers, keep true
+ *   time across sleeps; and a sleep is lengthened by it, so that it ends
+ *   by the time the next timer is due.
+ *
+ * Input Parameters:
+ *   ppb - Parts per billion of the time slept that the clock gains
+ *         (positive) or loses (negative); 0 corrects nothing.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is returned on
+ *   any failure: -EINVAL for a rate outside what the architecture takes.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_BOARDCTL_SLEEP_RATE
+int board_sleep_rate(int32_t ppb);
+#endif
+
+/****************************************************************************
  * Name:  board_userled_initialize
  *
  * Description:
