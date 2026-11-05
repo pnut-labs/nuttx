@@ -29,6 +29,8 @@
 #include "xtensa.h"
 #ifdef CONFIG_ESPRESSIF_SPIFLASH
 #include "esp_private/cache_utils.h"
+#elif defined(CONFIG_ESP32S3_SPIFLASH)
+#include "esp32s3_spiflash.h"
 #endif
 
 /****************************************************************************
@@ -71,7 +73,13 @@ uint32_t *xtensa_user(int exccause, uint32_t *regs)
     {
       spi_flash_restore_cache(cpu, 0);
     }
-#endif /* CONFIG_ESPRESSIF_SPIFLASH */
+#elif defined(CONFIG_ESP32S3_SPIFLASH)
+  /* NuttX's own SPI flash driver: the same, so that the panic's code and
+   * the RAM log, both behind the cache, can be reached
+   */
+
+  spiflash_panic_resume_cache();
+#endif
 
   /* xtensa_user_panic never returns. */
 

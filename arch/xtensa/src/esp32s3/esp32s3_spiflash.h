@@ -92,6 +92,25 @@ struct spiflash_map_req_s
 void spiflash_resume_cache(void);
 
 /****************************************************************************
+ * Name: spiflash_panic_resume_cache
+ *
+ * Description:
+ *   Resume the CPU cache if an SPI flash operation suspended it, for an
+ *   exception taken during the operation: the handler's code after this
+ *   point, and the RAM log it writes to, may live behind the cache.  Runs
+ *   from IRAM.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void spiflash_panic_resume_cache(void);
+
+/****************************************************************************
  * Name: esp32s3_mmap
  *
  * Description:

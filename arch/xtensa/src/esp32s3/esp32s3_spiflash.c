@@ -1079,6 +1079,29 @@ void spiflash_resume_cache(void)
 }
 
 /****************************************************************************
+ * Name: spiflash_panic_resume_cache
+ *
+ * Description:
+ *   Resume the CPU cache if an SPI flash operation suspended it, for an
+ *   exception taken during the operation.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void spiflash_panic_resume_cache(void)
+{
+  if (g_spi_flash_cache_suspended)
+    {
+      spiflash_resume_cache();
+    }
+}
+
+/****************************************************************************
  * Name: esp32s3_mmap
  *
  * Description:
