@@ -867,6 +867,7 @@ static inline void IRAM_ATTR spiflash_os_yield(void)
   /* Delay 1 tick */
 
   useconds_t us = TICK2USEC(1);
+
   nxsched_usleep(us);
 }
 #endif /* CONFIG_ESP32S3_SPI_FLASH_DONT_USE_ROM_CODE */
@@ -1079,6 +1080,29 @@ void spiflash_resume_cache(void)
 }
 
 /****************************************************************************
+ * Name: spiflash_panic_resume_cache
+ *
+ * Description:
+ *   Resume the CPU cache if an SPI flash operation suspended it, for an
+ *   exception taken during the operation.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void spiflash_panic_resume_cache(void)
+{
+  if (g_spi_flash_cache_suspended)
+    {
+      spiflash_resume_cache();
+    }
+}
+
+/****************************************************************************
  * Name: esp32s3_mmap
  *
  * Description:
@@ -1136,6 +1160,7 @@ int esp32s3_mmap(struct spiflash_map_req_s *req)
       req->ptr = (void *)(mapped_addr + MMU_ADDR2OFF(req->src_addr));
       ret = OK;
       int regval = getreg32(EXTMEM_DCACHE_CTRL1_REG);
+
       regval &= ~EXTMEM_DCACHE_SHUT_CORE0_BUS;
       putreg32(regval, EXTMEM_DCACHE_CTRL1_REG);
 
@@ -1340,6 +1365,7 @@ int spi_flash_write(uint32_t dest_addr, const void *buffer, uint32_t size)
     {
       uint32_t spi_buffer[SPI_BUFFER_WORDS];
       uint32_t n = FLASH_PAGE_SIZE - tx_addr % FLASH_PAGE_SIZE;
+
       n = MIN(n, MIN(tx_bytes, SPI_BUFFER_BYTES));
 
 #ifdef CONFIG_ESP32S3_SPIRAM
@@ -1557,5 +1583,6 @@ uint32_t esp32s3_get_flash_address_mapped_as_text(void)
 {
   uint32_t i = MMU_ADDR2PAGE((uint32_t)_stext) -
                MMU_ADDR2PAGE(SOC_MMU_IBUS_VADDR_BASE);
+
   return (FLASH_MMU_TABLE[i] & MMU_ADDRESS_MASK) * MMU_PAGE_SIZE;
 }
