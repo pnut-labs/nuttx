@@ -249,13 +249,14 @@ int nat_port_select(FAR struct net_driver_s *dev,
 #ifndef CONFIG_NET_TCP_NO_STACK
           /* Try to select local_port first. */
 
-          int ret = tcp_selectport(domain, external_ip, local_port);
+          int ret = tcp_selectport(domain, external_ip, local_port,
+                                   false);
 
           /* If failed, try select another unused port. */
 
           if (ret < 0)
             {
-              ret = tcp_selectport(domain, external_ip, 0);
+              ret = tcp_selectport(domain, external_ip, 0, false);
             }
 
           if (ret < 0)
@@ -316,6 +317,7 @@ int nat_port_select(FAR struct net_driver_s *dev,
 #ifdef CONFIG_NET_ICMP_SOCKET
           uint16_t id = local_port;
           uint16_t hid = NTOHS(id);
+
           while (icmp_findconn(dev, id) ||
                  nat_port_inuse(domain, IP_PROTO_ICMP, external_ip, id))
             {
@@ -344,6 +346,7 @@ int nat_port_select(FAR struct net_driver_s *dev,
 #ifdef CONFIG_NET_ICMPv6_SOCKET
           uint16_t id = local_port;
           uint16_t hid = NTOHS(id);
+
           while (icmpv6_active(id) ||
                  nat_port_inuse(domain, IP_PROTO_ICMP6, external_ip, id))
             {
@@ -429,7 +432,7 @@ uint32_t nat_expire_time(uint8_t protocol)
       default:
         nwarn("WARNING: Unsupported protocol %" PRIu8 "\n", protocol);
         return 0;
-  }
+    }
 }
 
 /****************************************************************************

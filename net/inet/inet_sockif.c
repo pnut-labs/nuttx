@@ -1138,7 +1138,7 @@ static int inet_listen(FAR struct socket *psock, int backlog)
 
           conn->lport = tcp_selectport(PF_INET,
                                 (FAR const union ip_addr_u *)
-                                &conn->u.ipv4.laddr, 0);
+                                &conn->u.ipv4.laddr, 0, false);
         }
 #endif /* CONFIG_NET_IPv4 */
 
@@ -1153,7 +1153,7 @@ static int inet_listen(FAR struct socket *psock, int backlog)
 
           conn->lport = tcp_selectport(PF_INET6,
                                 (FAR const union ip_addr_u *)
-                                conn->u.ipv6.laddr, 0);
+                                conn->u.ipv6.laddr, 0, false);
         }
 #endif /* CONFIG_NET_IPv6 */
     }
