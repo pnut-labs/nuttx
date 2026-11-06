@@ -29,9 +29,10 @@ service console sh
 #endif
 
 #ifdef CONFIG_SYSTEM_ADBD
-/* Stopped with SIGTERM, on which adbd closes its connections and its
- * listening socket and exits, so that it can listen again at once when
- * started again
+/* Stopped with SIGTERM first, so that an adbd that handles it (nuttx-apps'
+ * microADB patch 0002) closes its connections and its listening socket,
+ * and can listen again at once when started again; one that does not is
+ * sent SIGKILL after the gentle kill's timeout, as before
  */
 
 service adbd adbd
