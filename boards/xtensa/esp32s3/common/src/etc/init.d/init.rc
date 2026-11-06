@@ -29,7 +29,13 @@ service console sh
 #endif
 
 #ifdef CONFIG_SYSTEM_ADBD
+/* Stopped with SIGTERM, on which adbd closes its connections and its
+ * listening socket and exits, so that it can listen again at once when
+ * started again
+ */
+
 service adbd adbd
+   gentle_kill
 #endif
 
 #ifdef CONFIG_SYSTEM_FASTBOOTD
