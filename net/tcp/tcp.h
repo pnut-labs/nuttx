@@ -643,7 +643,9 @@ FAR struct tcp_conn_s *tcp_alloc_accept(FAR struct net_driver_s *dev,
  * Description:
  *   If the port number is zero; select an unused port for the connection.
  *   If the port number is non-zero, verify that no other connection has
- *   been created with this port number.
+ *   been created with this port number; with reuse (SO_REUSEADDR), that
+ *   no socket listens on it, nor an open connection, nor one closing
+ *   without SO_REUSEADDR, uses it.
  *
  * Returned Value:
  *   Selected or verified port number in network order on success, a negated
@@ -656,7 +658,7 @@ FAR struct tcp_conn_s *tcp_alloc_accept(FAR struct net_driver_s *dev,
 
 int tcp_selectport(uint8_t domain,
                    FAR const union ip_addr_u *ipaddr,
-                   uint16_t portno);
+                   uint16_t portno, bool reuse);
 
 /****************************************************************************
  * Name: tcp_bind

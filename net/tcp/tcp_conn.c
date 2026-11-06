@@ -71,6 +71,7 @@
 #include "icmpv6/icmpv6.h"
 #include "nat/nat.h"
 #include "netdev/netdev.h"
+#include "socket/socket.h"
 #include "utils/utils.h"
 
 /****************************************************************************
@@ -80,6 +81,25 @@
 #ifndef CONFIG_NET_TCP_MAX_CONNS
 #  define CONFIG_NET_TCP_MAX_CONNS 0
 #endif
+
+/* A connection's SO_REUSEADDR; never without socket options */
+
+#ifdef CONFIG_NET_SOCKOPTS
+#  define TCP_REUSEADDR(c) _SO_GETOPT((c)->sconn.s_options, SO_REUSEADDR)
+#else
+#  define TCP_REUSEADDR(c) false
+#endif
+
+/* A connection closing, its socket closed or shut down for sending: what
+ * a server stopped leaves on its port
+ */
+
+#define TCP_CLOSING_STATE(s) \
+  (((s) & TCP_STATE_MASK) == TCP_FIN_WAIT_1 || \
+   ((s) & TCP_STATE_MASK) == TCP_FIN_WAIT_2 || \
+   ((s) & TCP_STATE_MASK) == TCP_CLOSING || \
+   ((s) & TCP_STATE_MASK) == TCP_TIME_WAIT || \
+   ((s) & TCP_STATE_MASK) == TCP_LAST_ACK)
 
 /****************************************************************************
  * Private Data
@@ -109,11 +129,21 @@ static dq_queue_t g_active_tcp_connections;
  *   Primary uses: (1) to determine if a port number is available, (2) to
  *   To identify the socket that will accept new connections on a local port.
  *
+ *   With reuse (the binding socket's SO_REUSEADDR), a connection that
+ *   has SO_REUSEADDR too and is closing, its socket closed or shut down
+ *   for sending, does not keep the port; a listening socket, and any
+ *   other connection, always does.  The connections a listener with
+ *   SO_REUSEADDR accepted inherit it, so those left closing after a
+ *   server stopped no longer keep it from listening again at once.  An
+ *   open connection keeps the port even with SO_REUSEADDR: connect()
+ *   does not check that a local and remote address pair is unique, so
+ *   two could otherwise be the same.
+ *
  ****************************************************************************/
 
 static FAR struct tcp_conn_s *
   tcp_listener(uint8_t domain, FAR const union ip_addr_u *ipaddr,
-               uint16_t portno)
+               uint16_t portno, bool reuse)
 {
   FAR struct tcp_conn_s *conn = NULL;
 
@@ -122,10 +152,13 @@ static FAR struct tcp_conn_s *
   while ((conn = tcp_nextconn(conn)) != NULL)
     {
       /* Check if this connection is open and the local port assignment
-       * matches the requested port number.
+       * matches the requested port number; with SO_REUSEADDR on both
+       * sides, one closing does not count.
        */
 
       if (conn->tcpstateflags != TCP_CLOSED &&
+          !(reuse && TCP_REUSEADDR(conn) &&
+            TCP_CLOSING_STATE(conn->tcpstateflags)) &&
 #if defined(CONFIG_NET_IPv4) && defined(CONFIG_NET_IPv6)
           tcp_conn_cmp(domain, ipaddr, portno, conn)
 #else
@@ -343,7 +376,7 @@ static inline int tcp_ipv4_bind(FAR struct tcp_conn_s *conn,
 
   port = tcp_selectport(PF_INET,
                        (FAR const union ip_addr_u *)&addr->sin_addr.s_addr,
-                       addr->sin_port);
+                       addr->sin_port, TCP_REUSEADDR(conn));
   if (port < 0)
     {
       nerr("ERROR: tcp_selectport failed: %d\n", port);
@@ -439,7 +472,7 @@ static inline int tcp_ipv6_bind(FAR struct tcp_conn_s *conn,
 
   port = tcp_selectport(PF_INET6,
                 (FAR const union ip_addr_u *)addr->sin6_addr.in6_u.u6_addr16,
-                addr->sin6_port);
+                addr->sin6_port, TCP_REUSEADDR(conn));
   if (port < 0)
     {
       nerr("ERROR: tcp_selectport failed: %d\n", port);
@@ -504,7 +537,7 @@ static inline int tcp_ipv6_bind(FAR struct tcp_conn_s *conn,
 
 int tcp_selectport(uint8_t domain,
                    FAR const union ip_addr_u *ipaddr,
-                   uint16_t portno)
+                   uint16_t portno, bool reuse)
 {
   static uint16_t g_last_tcp_port;
 
@@ -539,7 +572,7 @@ int tcp_selectport(uint8_t domain,
               return -EADDRINUSE;
             }
         }
-      while (tcp_listener(domain, ipaddr, portno)
+      while (tcp_listener(domain, ipaddr, portno, false)
 #ifdef CONFIG_NET_NAT
              || nat_port_inuse(domain, IP_PROTO_TCP, ipaddr, portno)
 #endif
@@ -551,7 +584,7 @@ int tcp_selectport(uint8_t domain,
        * connection is using this local port.
        */
 
-      if (tcp_listener(domain, ipaddr, portno)
+      if (tcp_listener(domain, ipaddr, portno, reuse)
 #ifdef CONFIG_NET_NAT
           || nat_port_inuse(domain, IP_PROTO_TCP, ipaddr, portno)
 #endif
@@ -1024,6 +1057,7 @@ FAR struct tcp_conn_s *tcp_alloc_accept(FAR struct net_driver_s *dev,
 
 #if defined(CONFIG_NET_IPv4) && defined(CONFIG_NET_IPv6)
   bool ipv6 = IFF_IS_IPv6(dev->d_flags);
+
   domain = ipv6 ? PF_INET6 : PF_INET;
 #elif defined(CONFIG_NET_IPv4)
   domain = PF_INET;
@@ -1118,6 +1152,13 @@ FAR struct tcp_conn_s *tcp_alloc_accept(FAR struct net_driver_s *dev,
 #ifdef CONFIG_NET_SOCKOPTS
       conn->sconn.s_rcvtimeo = listener->sconn.s_rcvtimeo;
       conn->sconn.s_sndtimeo = listener->sconn.s_sndtimeo;
+
+      /* SO_REUSEADDR too, so that the listener's port can be bound again
+       * while this connection is closing (tcp_listener())
+       */
+
+      conn->sconn.s_options |= listener->sconn.s_options &
+                               _SO_BIT(SO_REUSEADDR);
 #  ifdef CONFIG_NET_BINDTODEVICE
       conn->sconn.s_boundto  = listener->sconn.s_boundto;
 #  endif
@@ -1298,7 +1339,7 @@ int tcp_connect(FAR struct tcp_conn_s *conn, FAR const struct sockaddr *addr)
 
           port = tcp_selectport(PF_INET,
                                 (FAR const union ip_addr_u *)
-                                &conn->u.ipv4.laddr, 0);
+                                &conn->u.ipv4.laddr, 0, false);
         }
 #endif /* CONFIG_NET_IPv4 */
 
@@ -1313,7 +1354,7 @@ int tcp_connect(FAR struct tcp_conn_s *conn, FAR const struct sockaddr *addr)
 
           port = tcp_selectport(PF_INET6,
                                 (FAR const union ip_addr_u *)
-                                conn->u.ipv6.laddr, 0);
+                                conn->u.ipv6.laddr, 0, false);
         }
 #endif /* CONFIG_NET_IPv6 */
 
@@ -1377,6 +1418,7 @@ int tcp_connect(FAR struct tcp_conn_s *conn, FAR const struct sockaddr *addr)
       if (net_ipv6addr_cmp(addr, g_ipv6_unspecaddr))
         {
           struct in6_addr loopback_sin6_addr = IN6ADDR_LOOPBACK_INIT;
+
           net_ipv6addr_copy(conn->u.ipv6.raddr,
                             loopback_sin6_addr.s6_addr16);
         }
