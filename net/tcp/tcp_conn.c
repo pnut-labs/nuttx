@@ -90,6 +90,17 @@
 #  define TCP_REUSEADDR(c) false
 #endif
 
+/* A connection closing, its socket closed or shut down for sending: what
+ * a server stopped leaves on its port
+ */
+
+#define TCP_CLOSING_STATE(s) \
+  (((s) & TCP_STATE_MASK) == TCP_FIN_WAIT_1 || \
+   ((s) & TCP_STATE_MASK) == TCP_FIN_WAIT_2 || \
+   ((s) & TCP_STATE_MASK) == TCP_CLOSING || \
+   ((s) & TCP_STATE_MASK) == TCP_TIME_WAIT || \
+   ((s) & TCP_STATE_MASK) == TCP_LAST_ACK)
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
@@ -119,10 +130,14 @@ static dq_queue_t g_active_tcp_connections;
  *   To identify the socket that will accept new connections on a local port.
  *
  *   With reuse (the binding socket's SO_REUSEADDR), a connection that
- *   has SO_REUSEADDR too does not keep the port, a listening socket
- *   always does, as on other systems: the connections a listener with
- *   SO_REUSEADDR accepted inherit it, so those left in TIME_WAIT after a
- *   server stopped no longer keep it from listening again at once.
+ *   has SO_REUSEADDR too and is closing, its socket closed or shut down
+ *   for sending, does not keep the port; a listening socket, and any
+ *   other connection, always does.  The connections a listener with
+ *   SO_REUSEADDR accepted inherit it, so those left closing after a
+ *   server stopped no longer keep it from listening again at once.  An
+ *   open connection keeps the port even with SO_REUSEADDR: connect()
+ *   does not check that a local and remote address pair is unique, so
+ *   two could otherwise be the same.
  *
  ****************************************************************************/
 
@@ -138,11 +153,12 @@ static FAR struct tcp_conn_s *
     {
       /* Check if this connection is open and the local port assignment
        * matches the requested port number; with SO_REUSEADDR on both
-       * sides, it does not count.
+       * sides, one closing does not count.
        */
 
       if (conn->tcpstateflags != TCP_CLOSED &&
-          !(reuse && TCP_REUSEADDR(conn)) &&
+          !(reuse && TCP_REUSEADDR(conn) &&
+            TCP_CLOSING_STATE(conn->tcpstateflags)) &&
 #if defined(CONFIG_NET_IPv4) && defined(CONFIG_NET_IPv6)
           tcp_conn_cmp(domain, ipaddr, portno, conn)
 #else
