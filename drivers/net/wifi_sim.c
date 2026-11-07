@@ -1708,8 +1708,7 @@ static int wifidriver_set_psk(FAR struct wifi_sim_s *wifidev,
           memset(wifidev->password, 0, sizeof(wifidev->password));
           memcpy(wifidev->password, ext->key, ext->key_len);
 
-          ninfo("psk=%s, key_len= %d, alg=%u\n", wifidev->password,
-                ext->key_len, ext->alg);
+          ninfo("key_len=%d, alg=%u\n", ext->key_len, ext->alg);
 
           /* Set the psk flag for security ap. */
 
