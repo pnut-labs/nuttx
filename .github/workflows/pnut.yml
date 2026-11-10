@@ -116,9 +116,14 @@ jobs:
             flake8==7.4.1 cmake-format==0.6.13
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
 
+      # nxstyle sees only the lines a pull request changes, with the three
+      # around each (-r): files from upstream and vendors carry old style
+      # errors that are not the pull request's.  Python and CMake files
+      # are still checked whole.
+
       - name: Check the pull request's changes
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           echo "::add-matcher::.github/nxstyle.json"
-          ./tools/checkpatch.sh -g "$BASE..HEAD"
+          ./tools/checkpatch.sh -r -g "$BASE..HEAD"
