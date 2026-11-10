@@ -120,18 +120,23 @@ format_file() {
 }
 
 check_file() {
-  if [ -x $@ ]; then
-    case $@ in
+  # With -r, the line ranges come first ("-r <start>,<count>" each), for
+  # nxstyle; every other check takes the file alone, the last argument
+
+  local file="${@: -1}"
+
+  if [ -x "$file" ]; then
+    case "$file" in
     *.bat | *.sh | *.py)
       ;;
     *)
-      echo "$@: error: execute permissions detected!"
+      echo "$file: error: execute permissions detected!"
       fail=1
       ;;
     esac
   fi
 
-  if [ "$(is_python_file $@)" == "1" ]; then
+  if [ "$(is_python_file "$file")" == "1" ]; then
     setupcfg="${TOOLDIR}/../.github/linters/setup.cfg"
     if ! command -v black &> /dev/null; then
       if [ $black_warning_once == 0 ]; then
@@ -140,7 +145,7 @@ check_file() {
         black_warning_once=1
       fi
       fail=1
-    elif ! black --check $@ 2>&1; then
+    elif ! black --check "$file" 2>&1; then
       if [ $black_warning_once == 0 ]; then
         echo -e "\nblack check failed, run following command to update the style:"
         echo -e "  $ black <src>\n"
@@ -155,7 +160,7 @@ check_file() {
         flake8_warning_once=1
       fi
       fail=1
-    elif ! flake8 --config "${setupcfg}" "$@" 2>&1; then
+    elif ! flake8 --config "${setupcfg}" "$file" 2>&1; then
       if [ $flake8_warning_once == 0 ]; then
         echo -e "\nflake8 check failed !!!"
         flake8_warning_once=1
@@ -169,22 +174,22 @@ check_file() {
         isort_warning_once=1
       fi
       fail=1
-    elif ! isort --diff --check-only --settings-path "${setupcfg}" "$@" 2>&1; then
+    elif ! isort --diff --check-only --settings-path "${setupcfg}" "$file" 2>&1; then
       if [ $isort_warning_once == 0 ]; then
-        isort --settings-path "${setupcfg}" "$@"
+        isort --settings-path "${setupcfg}" "$file"
         isort_warning_once=1
       fi
       fail=1
     fi
-  elif [ "$(is_rust_file $@)" == "1" ]; then
+  elif [ "$(is_rust_file "$file")" == "1" ]; then
     if ! command -v rustfmt &> /dev/null; then
       echo -e "\nrustfmt not found, run following command to install:"
       echo "  $ rustup component add rustfmt"
       fail=1
-    elif ! rustfmt --edition 2021 --check $@ 2>&1; then
+    elif ! rustfmt --edition 2021 --check "$file" 2>&1; then
       fail=1
     fi
-  elif [ "$(is_cmake_file $@)" == "1" ]; then
+  elif [ "$(is_cmake_file "$file")" == "1" ]; then
     if ! command -v cmake-format &> /dev/null; then
       if [ $cmake_warning_once == 0 ]; then
         echo -e "\ncmake-format not found, run following command to install:"
@@ -192,16 +197,16 @@ check_file() {
         cmake_warning_once=1
       fi
       fail=1
-    elif ! cmake-format --check $@ 2>&1; then
+    elif ! cmake-format --check "$file" 2>&1; then
       if [ $cmake_warning_once == 0 ]; then
         echo -e "\ncmake-format check failed, run following command to update the style:"
         echo -e "  $ cmake-format <src> -o <dst>\n"
-        cmake-format --check $@ 2>&1
+        cmake-format --check "$file" 2>&1
         cmake_warning_once=1
       fi
       fail=1
     fi
-  elif ! $TOOLDIR/nxstyle $@ 2>&1; then
+  elif ! $TOOLDIR/nxstyle "$@" 2>&1; then
     fail=1
   fi
 
@@ -221,7 +226,7 @@ check_file() {
       else
         codespell_args=""
       fi
-      if ! codespell $codespell_args ${@: -1}; then
+      if ! codespell $codespell_args "$file"; then
         fail=1
       fi
     fi
@@ -236,11 +241,11 @@ check_file() {
       fi
       fail=1
     else
-      md5="$(md5sum $@)"
-      cvt2utf convert --nobak "$@" &> /dev/null
-      if [ "$md5" != "$(md5sum $@)" ]; then
+      md5="$(md5sum "$file")"
+      cvt2utf convert --nobak "$file" &> /dev/null
+      if [ "$md5" != "$(md5sum "$file")" ]; then
         if [ $cvt2utf_warning_once == 0 ]; then
-            echo "$@: error: Non-UTF8 characters detected!"
+            echo "$file: error: Non-UTF8 characters detected!"
             cvt2utf_warning_once=1
         fi
         fail=1
@@ -261,8 +266,11 @@ check_ranges() {
       fi
       path=$(realpath "${BASH_REMATCH[3]}")
       ranges=""
-    elif [[ $REPLY =~ @@\ -[0-9]+(,[0-9]+)?\ \+([0-9]+,[0-9]+)?\ @@.* ]]; then
-      ranges+="-r ${BASH_REMATCH[2]} "
+    elif [[ $REPLY =~ @@\ -[0-9]+(,[0-9]+)?\ \+([0-9]+)(,([0-9]+))?\ @@.* ]]; then
+
+      # A hunk of one line has no count: nxstyle needs one
+
+      ranges+="-r ${BASH_REMATCH[2]},${BASH_REMATCH[4]:-1} "
     fi
   done
   if [ "$ranges" != "" ]; then
