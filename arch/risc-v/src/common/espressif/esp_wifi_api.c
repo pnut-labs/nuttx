@@ -1681,6 +1681,7 @@ int esp_wifi_softap_password(struct iwreq *iwr, bool set)
       else
         {
           len = size;
+          ext->key_len = len;
           memcpy(pdata, wifi_cfg.ap.password, len);
         }
     }
