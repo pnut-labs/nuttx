@@ -1698,8 +1698,10 @@ static int wifidriver_set_psk(FAR struct wifi_sim_s *wifidev,
         return -ENOSYS;
     }
 
-  /* The key must lie within what the request carries, and fit: a
-   * 64-hex-digit key fills it, with no end
+  /* The key must lie within what the request carries, and fit the
+   * 64-byte buffer.  A raw PSK of 64 hex digits fills all of it with no
+   * terminating NUL, which every reader here allows for (strncmp and
+   * strnlen bounded to the buffer).
    */
 
   if (pwrq->u.encoding.length < sizeof(*ext) ||
