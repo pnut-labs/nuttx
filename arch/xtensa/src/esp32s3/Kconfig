@@ -2127,14 +2127,17 @@ config ESP32S3_OTA_SLOT_SIZE
 config ESP32S3_OTA_SCRATCH_OFFSET
 	hex "Scratch partition offset"
 	default 0x220000
+	depends on !ESP32S3_MCUBOOT_SWAP_USING_MOVE
 
 config ESP32S3_OTA_SCRATCH_SIZE
 	hex "Scratch partition size"
 	default 0x40000
+	depends on !ESP32S3_MCUBOOT_SWAP_USING_MOVE
 
 config ESP32S3_OTA_SCRATCH_DEVPATH
 	string "Scratch partition device path"
 	default "/dev/otascratch"
+	depends on !ESP32S3_MCUBOOT_SWAP_USING_MOVE
 
 endif # ESP32S3_HAVE_OTA_PARTITION
 
@@ -3046,6 +3049,41 @@ config ESP32S3_MCUBOOT_VERSION
 	string "MCUboot version"
 	default "8a07053d42e592c85cb35b79c4de1b7749943387"
 	depends on ESP32S3_APP_FORMAT_MCUBOOT
+
+choice ESP32S3_MCUBOOT_SWAP
+	prompt "MCUboot swap mode"
+	default ESP32S3_MCUBOOT_SWAP_USING_SCRATCH
+	depends on ESP32S3_APP_FORMAT_MCUBOOT
+	---help---
+		How MCUboot swaps the two slots to start an update, and swaps them
+		back when the update is not confirmed.
+
+config ESP32S3_MCUBOOT_SWAP_USING_SCRATCH
+	bool "Swap through the scratch area"
+
+config ESP32S3_MCUBOOT_SWAP_USING_MOVE
+	bool "Swap by moving sectors, without a scratch area"
+	---help---
+		MCUboot first moves the primary slot's sectors up by one sector,
+		then swaps them with the secondary slot's one by one: no scratch
+		area is needed.  The largest image is one sector and the image
+		trailer smaller than a slot.
+
+endchoice # MCUboot swap mode
+
+config ESP32S3_MCUBOOT_MAX_IMG_SECTORS
+	int "MCUboot's largest slot, in flash sectors"
+	default 512
+	range 512 1024
+	depends on ESP32S3_APP_FORMAT_MCUBOOT
+	---help---
+		MCUboot swaps slots of at most this many 4 KB sectors, so it must
+		be at least ESP32S3_OTA_SLOT_SIZE / 4096; the build stops
+		otherwise.  MCUboot keeps a table of the sectors in its RAM, 8
+		bytes per sector for each slot and for the scratch area: 1024
+		sectors (4 MB slots) take 24 KB of the bootloader's 38.5 KB with
+		the scratch area, 16 KB without.  Espressif's port of MCUboot fixes
+		it at 512 (2 MB slots); the build patches MCUboot to take this value.
 
 config ESP32S3_APP_MCUBOOT_HEADER_SIZE
 	int "Application image header size (in bytes)"

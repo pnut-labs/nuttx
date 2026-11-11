@@ -92,12 +92,14 @@ static const struct partition_s g_ota_partition_table[] =
     .firstblock = CONFIG_ESP32S3_OTA_SECONDARY_SLOT_OFFSET,
     .blocksize  = CONFIG_ESP32S3_OTA_SLOT_SIZE,
   },
+#ifndef CONFIG_ESP32S3_MCUBOOT_SWAP_USING_MOVE
   {
     .name       = CONFIG_ESP32S3_OTA_SCRATCH_DEVPATH,
     .index      = 2,
     .firstblock = CONFIG_ESP32S3_OTA_SCRATCH_OFFSET,
     .blocksize  = CONFIG_ESP32S3_OTA_SCRATCH_SIZE,
   }
+#endif
 };
 #endif
 
