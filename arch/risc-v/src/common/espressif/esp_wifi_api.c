@@ -698,7 +698,7 @@ int esp_wifi_sta_password(struct iwreq *iwr, bool set)
   if (set)
     {
       len = ext->key_len;
-      if (len > PWD_MAX_LEN)
+      if (ext->key_len > PWD_MAX_LEN)
         {
           return -EINVAL;
         }
@@ -1643,7 +1643,7 @@ int esp_wifi_softap_password(struct iwreq *iwr, bool set)
   pdata = ext->key;
   len = ext->key_len;
 
-  if (set && len > PWD_MAX_LEN)
+  if (set && ext->key_len > PWD_MAX_LEN)
     {
       return -EINVAL;
     }
