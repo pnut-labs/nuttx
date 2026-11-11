@@ -688,9 +688,6 @@ int esp_wifi_sta_password(struct iwreq *iwr, bool set)
   struct iw_encode_ext *ext = iwr->u.encoding.pointer;
   uint8_t *pdata;
   uint8_t len;
-#ifdef CONFIG_DEBUG_WIRELESS_INFO
-  char buf[PWD_MAX_LEN + 1];
-#endif
 
   DEBUGASSERT(ext != NULL);
 
@@ -701,7 +698,7 @@ int esp_wifi_sta_password(struct iwreq *iwr, bool set)
   if (set)
     {
       len = ext->key_len;
-      if (len > PWD_MAX_LEN)
+      if (ext->key_len > PWD_MAX_LEN)
         {
           return -EINVAL;
         }
@@ -782,9 +779,7 @@ int esp_wifi_sta_password(struct iwreq *iwr, bool set)
     }
 
 #ifdef CONFIG_DEBUG_WIRELESS_INFO
-  memcpy(buf, pdata, len);
-  buf[len] = 0;
-  wlinfo("Wi-Fi station password=%s len=%d\n", buf, len);
+  wlinfo("Wi-Fi station password: %u bytes\n", (unsigned int)ext->key_len);
 #endif
 
   return OK;
@@ -1642,16 +1637,13 @@ int esp_wifi_softap_password(struct iwreq *iwr, bool set)
   struct iw_encode_ext *ext = iwr->u.encoding.pointer;
   uint8_t *pdata;
   uint8_t len;
-#ifdef CONFIG_DEBUG_WIRELESS_INFO
-  char buf[PWD_MAX_LEN + 1];
-#endif
 
   DEBUGASSERT(ext != NULL);
 
   pdata = ext->key;
   len = ext->key_len;
 
-  if (set && len > PWD_MAX_LEN)
+  if (set && ext->key_len > PWD_MAX_LEN)
     {
       return -EINVAL;
     }
@@ -1689,14 +1681,13 @@ int esp_wifi_softap_password(struct iwreq *iwr, bool set)
       else
         {
           len = size;
+          ext->key_len = len;
           memcpy(pdata, wifi_cfg.ap.password, len);
         }
     }
 
 #ifdef CONFIG_DEBUG_WIRELESS_INFO
-  memcpy(buf, pdata, len);
-  buf[len] = 0;
-  wlinfo("Wi-Fi SoftAP password=%s len=%d\n", buf, len);
+  wlinfo("Wi-Fi SoftAP password: %d bytes\n", len);
 #endif
 
   return OK;

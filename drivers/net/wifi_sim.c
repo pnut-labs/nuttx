@@ -1685,6 +1685,19 @@ static int wifidriver_set_psk(FAR struct wifi_sim_s *wifidev,
 
   ext = (FAR struct iw_encode_ext *)pwrq->u.encoding.pointer;
 
+  /* The request must carry the whole header before any of it is read,
+   * and the key must lie within it and fit the 64-byte buffer.  A raw PSK
+   * of 64 hex digits fills all of it with no terminating NUL, which every
+   * reader here allows for (strncmp and strnlen bounded to the buffer).
+   */
+
+  if (ext == NULL || pwrq->u.encoding.length < sizeof(*ext) ||
+      ext->key_len > pwrq->u.encoding.length - sizeof(*ext) ||
+      ext->key_len > sizeof(wifidev->password))
+    {
+      return -EINVAL;
+    }
+
   /* set auth_alg */
 
   switch (ext->alg)
@@ -1708,8 +1721,8 @@ static int wifidriver_set_psk(FAR struct wifi_sim_s *wifidev,
           memset(wifidev->password, 0, sizeof(wifidev->password));
           memcpy(wifidev->password, ext->key, ext->key_len);
 
-          ninfo("psk=%s, key_len= %d, alg=%u\n", wifidev->password,
-                ext->key_len, ext->alg);
+          ninfo("key_len=%u, alg=%u\n", (unsigned int)ext->key_len,
+                (unsigned int)ext->alg);
 
           /* Set the psk flag for security ap. */
 

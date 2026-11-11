@@ -1244,11 +1244,22 @@ static int wifidriver_set_psk(struct sim_wifi_s *wifidev,
 
   ext = (struct iw_encode_ext *)pwrq->u.encoding.pointer;
 
+  /* The key must lie within what the request carries, and fit with its
+   * end: it is used as a string
+   */
+
+  if (ext == NULL || pwrq->u.encoding.length < sizeof(*ext) ||
+      ext->key_len > pwrq->u.encoding.length - sizeof(*ext) ||
+      ext->key_len >= sizeof(wifidev->password))
+    {
+      return -EINVAL;
+    }
+
   memset(wifidev->password, 0, sizeof(wifidev->password));
   memcpy(wifidev->password, ext->key, ext->key_len);
 
-  ninfo("psk=%s, key_len= %d, alg=%u\n", wifidev->password,
-        ext->key_len, ext->alg);
+  ninfo("key_len=%u, alg=%u\n", (unsigned int)ext->key_len,
+        (unsigned int)ext->alg);
 
   /* set auth_alg */
 
