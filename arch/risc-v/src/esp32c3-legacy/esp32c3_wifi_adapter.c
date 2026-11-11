@@ -5259,7 +5259,8 @@ int esp_wifi_sta_password(struct iwreq *iwr, bool set)
     }
 
 #ifdef CONFIG_DEBUG_WIRELESS_INFO
-  wlinfo("INFO: Wi-Fi station password: %d bytes\n", ext->key_len);
+  wlinfo("INFO: Wi-Fi station password: %u bytes\n",
+         (unsigned int)ext->key_len);
 #endif
 
   return OK;
