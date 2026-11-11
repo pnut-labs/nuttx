@@ -1691,7 +1691,7 @@ static int wifidriver_set_psk(FAR struct wifi_sim_s *wifidev,
    * reader here allows for (strncmp and strnlen bounded to the buffer).
    */
 
-  if (pwrq->u.encoding.length < sizeof(*ext) ||
+  if (ext == NULL || pwrq->u.encoding.length < sizeof(*ext) ||
       ext->key_len > pwrq->u.encoding.length - sizeof(*ext) ||
       ext->key_len > sizeof(wifidev->password))
     {

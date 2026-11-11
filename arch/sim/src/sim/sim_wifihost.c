@@ -1248,7 +1248,7 @@ static int wifidriver_set_psk(struct sim_wifi_s *wifidev,
    * end: it is used as a string
    */
 
-  if (pwrq->u.encoding.length < sizeof(*ext) ||
+  if (ext == NULL || pwrq->u.encoding.length < sizeof(*ext) ||
       ext->key_len > pwrq->u.encoding.length - sizeof(*ext) ||
       ext->key_len >= sizeof(wifidev->password))
     {
