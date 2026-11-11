@@ -36,6 +36,12 @@ HALDIR             = $(BOOTLOADER_DIR)/esp-hal-3rdparty-mcuboot
 MCUBOOT_SRCDIR     = $(BOOTLOADER_DIR)/mcuboot
 MCUBOOT_ESPDIR     = $(MCUBOOT_SRCDIR)/boot/espressif
 MCUBOOT_TOOLCHAIN  = $(TOPDIR)/tools/esp32s3/mcuboot_toolchain_esp32s3.cmake
+MCUBOOT_PATCH      = $(TOOLSDIR)/patches/mcuboot-max-img-sectors.patch
+
+# The most sectors a slot may span: 512, MCUboot's own, for a .config
+# from before the option
+
+MCUBOOT_SECTORS    = $(or $(CONFIG_ESP32S3_MCUBOOT_MAX_IMG_SECTORS),512)
 
 ifndef MCUBOOT_VERSION
 	MCUBOOT_VERSION = $(CONFIG_ESP32S3_MCUBOOT_VERSION)
@@ -57,7 +63,13 @@ $(BOOTLOADER_DIR):
 cfg_en  = echo "$(1)=$(if $(CONFIG_ESP32S3_APP_FORMAT_MCUBOOT),1,y)";
 cfg_val = echo "$(1)=$(2)";
 
-$(BOOTLOADER_CONFIG): $(TOPDIR)/.config $(BOOTLOADER_DIR)
+$(BOOTLOADER_CONFIG): $(TOPDIR)/.config | $(BOOTLOADER_DIR)
+ifeq ($(CONFIG_ESP32S3_APP_FORMAT_MCUBOOT),y)
+	$(Q) if [ $$(( ($(CONFIG_ESP32S3_OTA_SLOT_SIZE) + 4095) / 4096 )) -gt $(MCUBOOT_SECTORS) ]; then \
+		echo "ESP32S3_OTA_SLOT_SIZE spans more than ESP32S3_MCUBOOT_MAX_IMG_SECTORS sectors: MCUboot could not swap the slots"; \
+		exit 1; \
+	fi
+endif
 	$(Q) echo "Creating Bootloader configuration"
 	$(Q) { \
 		$(call cfg_en,NON_OS_BUILD) \
@@ -85,13 +97,16 @@ ifeq ($(CONFIG_ESP32S3_APP_FORMAT_MCUBOOT),y)
 		$(call cfg_val,CONFIG_ESP_IMAGE0_SECONDARY_START_ADDRESS,$(CONFIG_ESP32S3_OTA_SECONDARY_SLOT_OFFSET)) \
 		$(call cfg_en,CONFIG_ESP_MCUBOOT_WDT_ENABLE) \
 		$(call cfg_en,CONFIG_LIBC_NEWLIB) \
-		$(call cfg_val,CONFIG_ESP_SCRATCH_OFFSET,$(CONFIG_ESP32S3_OTA_SCRATCH_OFFSET)) \
-		$(call cfg_val,CONFIG_ESP_SCRATCH_SIZE,$(CONFIG_ESP32S3_OTA_SCRATCH_SIZE)) \
-		$(call cfg_en,CONFIG_ESP_CONSOLE_UART) \
+		$(if $(CONFIG_ESP32S3_MCUBOOT_SWAP_USING_MOVE),$(call cfg_en,CONFIG_ESP_BOOT_SWAP_USING_MOVE)) \
+		$(if $(CONFIG_ESP32S3_MCUBOOT_SWAP_USING_MOVE),,$(call cfg_val,CONFIG_ESP_SCRATCH_OFFSET,$(CONFIG_ESP32S3_OTA_SCRATCH_OFFSET))) \
+		$(if $(CONFIG_ESP32S3_MCUBOOT_SWAP_USING_MOVE),,$(call cfg_val,CONFIG_ESP_SCRATCH_SIZE,$(CONFIG_ESP32S3_OTA_SCRATCH_SIZE))) \
+		$(call cfg_val,CONFIG_ESP_MAX_IMG_SECTORS,$(MCUBOOT_SECTORS)) \
+		$(if $(CONFIG_UART0_SERIAL_CONSOLE)$(CONFIG_UART1_SERIAL_CONSOLE),$(call cfg_en,CONFIG_ESP_CONSOLE_UART)) \
 		$(if $(CONFIG_UART0_SERIAL_CONSOLE),$(call cfg_val,CONFIG_ESP_CONSOLE_UART_NUM,0)) \
 		$(if $(CONFIG_UART1_SERIAL_CONSOLE),$(call cfg_val,CONFIG_ESP_CONSOLE_UART_NUM,1)) \
 		$(if $(CONFIG_UART0_SERIAL_CONSOLE),$(call cfg_val,CONFIG_ESP_CONSOLE_ROM_SERIAL_PORT_NUM,0)) \
 		$(if $(CONFIG_UART1_SERIAL_CONSOLE),$(call cfg_val,CONFIG_ESP_CONSOLE_ROM_SERIAL_PORT_NUM,1)) \
+		$(if $(CONFIG_UART0_SERIAL_CONSOLE)$(CONFIG_UART1_SERIAL_CONSOLE),,$(if $(CONFIG_ESP32S3_USBSERIAL),$(call cfg_en,CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG),$(call cfg_en,CONFIG_ESP_CONSOLE_NONE))) \
 		$(call cfg_en,CONFIG_BOOTLOADER_FLASH_XMC_SUPPORT) \
 		$(call cfg_en,CONFIG_IDF_TARGET_ARCH_XTENSA) \
 		$(call cfg_val,CONFIG_BOOTLOADER_LOG_LEVEL,3) \
@@ -130,19 +145,26 @@ define CLONE_ESP_HAL_3RDPARTY_REPO_MCUBOOT
 	$(call CLONE, $(ESP_HAL_3RDPARTY_URL),$(HALDIR))
 endef
 
-$(MCUBOOT_SRCDIR): $(BOOTLOADER_DIR)
+$(MCUBOOT_SRCDIR): | $(BOOTLOADER_DIR)
 	$(Q) echo "Cloning MCUboot"
 	$(Q) git clone --quiet $(MCUBOOT_URL) $(MCUBOOT_SRCDIR)
 	$(Q) git -C "$(MCUBOOT_SRCDIR)" checkout --quiet $(MCUBOOT_VERSION)
 	$(Q) git -C "$(MCUBOOT_SRCDIR)" submodule --quiet update --init --recursive ext/mbedtls
 
-$(HALDIR):
+$(HALDIR): | $(BOOTLOADER_DIR)
 	$(Q) echo "Cloning Espressif HAL for 3rd Party Platforms (MCUBoot build)"
 	$(Q) $(call CLONE_ESP_HAL_3RDPARTY_REPO_MCUBOOT)
 	$(Q) echo "Espressif HAL for 3rd Party Platforms (MCUBoot build): ${ESP_HAL_3RDPARTY_VERSION_FOR_MCUBOOT}"
 	$(Q) git -C $(HALDIR) checkout --quiet $(ESP_HAL_3RDPARTY_VERSION_FOR_MCUBOOT)
 
-$(BOOTLOADER_BIN): $(HALDIR) $(MCUBOOT_SRCDIR) $(BOOTLOADER_CONFIG)
+# The patch makes MCUboot take CONFIG_ESP_MAX_IMG_SECTORS; applied once,
+# to a clone made before it too.  After a change to the patch: make
+# clean_bootloader.
+
+$(BOOTLOADER_BIN): $(HALDIR) $(MCUBOOT_SRCDIR) $(BOOTLOADER_CONFIG) $(MCUBOOT_PATCH)
+	$(Q) if ! git -C "$(MCUBOOT_SRCDIR)" apply --reverse --check $(MCUBOOT_PATCH) 2>/dev/null; then \
+		git -C "$(MCUBOOT_SRCDIR)" apply $(MCUBOOT_PATCH); \
+	fi
 	$(Q) echo "Building Bootloader"
 	$(Q) $(TOOLSDIR)/build_mcuboot.sh \
 		-c esp32s3 \
@@ -161,7 +183,7 @@ clean_bootloader:
 
 else ifeq ($(CONFIG_ESP32S3_APP_FORMAT_LEGACY),y)
 
-$(BOOTLOADER_SRCDIR): $(BOOTLOADER_DIR)
+$(BOOTLOADER_SRCDIR): | $(BOOTLOADER_DIR)
 	$(Q) git clone $(BOOTLOADER_URL) $(BOOTLOADER_SRCDIR) -b $(BOOTLOADER_VERSION)
 
 bootloader: $(BOOTLOADER_SRCDIR) $(BOOTLOADER_CONFIG)

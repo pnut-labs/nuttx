@@ -1,0 +1,29 @@
+From 961fa903ac1890857cd89b60bef2623ce89f0a88 Mon Sep 17 00:00:00 2001
+From: Mateusz Pianka <1429923+piankma@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 19:07:40 +0000
+Subject: [PATCH] espressif: take the slots' largest sector count from the
+ configuration
+
+MCUBOOT_MAX_IMG_SECTORS was fixed at 512, so with 4 KB sectors MCUboot
+could swap slots of at most 2 MB.  CONFIG_ESP_MAX_IMG_SECTORS, from the
+bootloader's configuration file, now sets it when given; 512 otherwise.
+---
+ boot/espressif/hal/include/mcuboot_config/mcuboot_config.h | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/boot/espressif/hal/include/mcuboot_config/mcuboot_config.h b/boot/espressif/hal/include/mcuboot_config/mcuboot_config.h
+index d0085dc..df2985f 100644
+--- a/boot/espressif/hal/include/mcuboot_config/mcuboot_config.h
++++ b/boot/espressif/hal/include/mcuboot_config/mcuboot_config.h
+@@ -133,7 +133,11 @@
+ 
+ /* Default maximum number of flash sectors per image slot; change
+  * as desirable. */
++#ifdef CONFIG_ESP_MAX_IMG_SECTORS
++#define MCUBOOT_MAX_IMG_SECTORS CONFIG_ESP_MAX_IMG_SECTORS
++#else
+ #define MCUBOOT_MAX_IMG_SECTORS 512
++#endif
+ 
+ /* Default number of separately updateable images; change in case of
+  * multiple images. */

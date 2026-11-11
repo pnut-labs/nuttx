@@ -120,9 +120,15 @@ else ifeq ($(CONFIG_ESP32S3_APP_FORMAT_MCUBOOT),y)
 		IMGTOOL_ALIGN_ARGS := --align 4
 	endif
 
+# -M: the image's trailer as large as MCUboot's, whose swap status has
+# room for this many sectors, so that imgtool refuses an image that would
+# overlap it.  Swap-move also needs one more free sector, which imgtool
+# does not count: an image within 4 KB of the limit still signs.
+
 	IMGTOOL_SIGN_ARGS  := --pad $(VERIFIED) $(IMGTOOL_ALIGN_ARGS) -v 0 -s auto \
 		-H $(CONFIG_ESP32S3_APP_MCUBOOT_HEADER_SIZE) --pad-header \
-		-S $(CONFIG_ESP32S3_OTA_SLOT_SIZE)
+		-S $(CONFIG_ESP32S3_OTA_SLOT_SIZE) \
+		-M $(or $(CONFIG_ESP32S3_MCUBOOT_MAX_IMG_SECTORS),512)
 else
 #   CONFIG_ESPRESSIF_SIMPLE_BOOT
 
