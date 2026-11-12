@@ -666,6 +666,17 @@ Offset       Size     What
 * The device data and the package store are not used yet.
 * Earlier firmware for this board kept littlefs volumes at 0x800000 and
   0xf00000: the system partition overwrites part of the first.
+* With MCUboot (``ESP32S3_APP_FORMAT_MCUBOOT`` with the slots above,
+  ``ESP32S3_MCUBOOT_SWAP_USING_MOVE`` and 1024 sectors a slot), swapping
+  the slots for a 1.5 MB firmware takes about 70 s, and as long again
+  to go back.  ``ESP32S3_MCUBOOT_PROGRESS`` shows it on the panel:
+  the board's ``bootloader/progress.c``, built into MCUboot, draws
+  "Installing update" (or "Undoing update") and a bar that grows as the
+  slots are swapped.  It drives the panel's lines by hand, with no frame
+  buffer (MCUboot has some 14 KB of RAM left with 4 MB slots), powers the
+  LoRa radio through the XL9555 if it is off (unpowered, the radio loads
+  the shared bus), and does not wait for each partial refresh: the swap
+  takes about 3 s longer.  NuttX clears the panel when it starts.
 
 Power management
 ================
