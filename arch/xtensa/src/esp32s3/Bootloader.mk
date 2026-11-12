@@ -36,7 +36,17 @@ HALDIR             = $(BOOTLOADER_DIR)/esp-hal-3rdparty-mcuboot
 MCUBOOT_SRCDIR     = $(BOOTLOADER_DIR)/mcuboot
 MCUBOOT_ESPDIR     = $(MCUBOOT_SRCDIR)/boot/espressif
 MCUBOOT_TOOLCHAIN  = $(TOPDIR)/tools/esp32s3/mcuboot_toolchain_esp32s3.cmake
-MCUBOOT_PATCH      = $(TOOLSDIR)/patches/mcuboot-max-img-sectors.patch
+MCUBOOT_PATCHES    = $(TOOLSDIR)/patches/mcuboot-max-img-sectors.patch
+MCUBOOT_PATCHES   += $(TOOLSDIR)/patches/mcuboot-swap-progress.patch
+
+# The board's own MCUboot sources, which show a swap's progress
+
+ifeq ($(CONFIG_ESP32S3_MCUBOOT_PROGRESS),y)
+  MCUBOOT_BOARD_SOURCES = $(BOARD_DIR)/bootloader/progress.c
+  ifeq ($(wildcard $(MCUBOOT_BOARD_SOURCES)),)
+    $(error ESP32S3_MCUBOOT_PROGRESS needs $(MCUBOOT_BOARD_SOURCES))
+  endif
+endif
 
 # The most sectors a slot may span: 512, MCUboot's own, for a .config
 # from before the option
@@ -101,6 +111,7 @@ ifeq ($(CONFIG_ESP32S3_APP_FORMAT_MCUBOOT),y)
 		$(if $(CONFIG_ESP32S3_MCUBOOT_SWAP_USING_MOVE),,$(call cfg_val,CONFIG_ESP_SCRATCH_OFFSET,$(CONFIG_ESP32S3_OTA_SCRATCH_OFFSET))) \
 		$(if $(CONFIG_ESP32S3_MCUBOOT_SWAP_USING_MOVE),,$(call cfg_val,CONFIG_ESP_SCRATCH_SIZE,$(CONFIG_ESP32S3_OTA_SCRATCH_SIZE))) \
 		$(call cfg_val,CONFIG_ESP_MAX_IMG_SECTORS,$(MCUBOOT_SECTORS)) \
+		$(if $(MCUBOOT_BOARD_SOURCES),$(call cfg_val,CONFIG_ESP_BOARD_SOURCES,$(MCUBOOT_BOARD_SOURCES))) \
 		$(if $(CONFIG_UART0_SERIAL_CONSOLE)$(CONFIG_UART1_SERIAL_CONSOLE),$(call cfg_en,CONFIG_ESP_CONSOLE_UART)) \
 		$(if $(CONFIG_UART0_SERIAL_CONSOLE),$(call cfg_val,CONFIG_ESP_CONSOLE_UART_NUM,0)) \
 		$(if $(CONFIG_UART1_SERIAL_CONSOLE),$(call cfg_val,CONFIG_ESP_CONSOLE_UART_NUM,1)) \
@@ -157,14 +168,18 @@ $(HALDIR): | $(BOOTLOADER_DIR)
 	$(Q) echo "Espressif HAL for 3rd Party Platforms (MCUBoot build): ${ESP_HAL_3RDPARTY_VERSION_FOR_MCUBOOT}"
 	$(Q) git -C $(HALDIR) checkout --quiet $(ESP_HAL_3RDPARTY_VERSION_FOR_MCUBOOT)
 
-# The patch makes MCUboot take CONFIG_ESP_MAX_IMG_SECTORS; applied once,
-# to a clone made before it too.  After a change to the patch: make
-# clean_bootloader.
+# The patches make MCUboot take CONFIG_ESP_MAX_IMG_SECTORS, and build a
+# board's CONFIG_ESP_BOARD_SOURCES, which may show a swap's progress; each
+# is applied once, to a clone made before it too.  After a change to one:
+# make clean_bootloader.
 
-$(BOOTLOADER_BIN): $(HALDIR) $(MCUBOOT_SRCDIR) $(BOOTLOADER_CONFIG) $(MCUBOOT_PATCH)
-	$(Q) if ! git -C "$(MCUBOOT_SRCDIR)" apply --reverse --check $(MCUBOOT_PATCH) 2>/dev/null; then \
-		git -C "$(MCUBOOT_SRCDIR)" apply $(MCUBOOT_PATCH); \
-	fi
+$(BOOTLOADER_BIN): $(HALDIR) $(MCUBOOT_SRCDIR) $(BOOTLOADER_CONFIG) $(MCUBOOT_PATCHES) \
+		  $(MCUBOOT_BOARD_SOURCES)
+	$(Q) for patch in $(MCUBOOT_PATCHES); do \
+		if ! git -C "$(MCUBOOT_SRCDIR)" apply --reverse --check $$patch 2>/dev/null; then \
+			git -C "$(MCUBOOT_SRCDIR)" apply $$patch || exit 1; \
+		fi; \
+	done
 	$(Q) echo "Building Bootloader"
 	$(Q) $(TOOLSDIR)/build_mcuboot.sh \
 		-c esp32s3 \

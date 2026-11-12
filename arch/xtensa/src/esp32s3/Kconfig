@@ -3085,6 +3085,23 @@ config ESP32S3_MCUBOOT_MAX_IMG_SECTORS
 		the scratch area, 16 KB without.  Espressif's port of MCUboot fixes
 		it at 512 (2 MB slots); the build patches MCUboot to take this value.
 
+config ESP32S3_HAVE_MCUBOOT_PROGRESS
+	bool
+	default n
+	---help---
+		Selected by a board that has bootloader/progress.c, for
+		ESP32S3_MCUBOOT_PROGRESS.
+
+config ESP32S3_MCUBOOT_PROGRESS
+	bool "MCUboot shows a swap's progress"
+	depends on ESP32S3_HAVE_MCUBOOT_PROGRESS
+	depends on ESP32S3_APP_FORMAT_MCUBOOT && ESP32S3_MCUBOOT_SWAP_USING_MOVE
+	---help---
+		MCUboot tells the board how far a swap has got, and the board's
+		bootloader/progress.c, built into MCUboot, shows it: a swap of a
+		1.5 MB firmware takes about a minute.  Only a board that has that
+		file offers this; it is never built into NuttX.
+
 config ESP32S3_APP_MCUBOOT_HEADER_SIZE
 	int "Application image header size (in bytes)"
 	default 32
