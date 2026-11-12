@@ -671,12 +671,16 @@ Offset       Size     What
   the slots for a 1.5 MB firmware takes about 70 s, and as long again
   to go back.  ``ESP32S3_MCUBOOT_PROGRESS`` shows it on the panel:
   the board's ``bootloader/progress.c``, built into MCUboot, draws
-  "Installing update" (or "Undoing update") and a bar that grows as the
-  slots are swapped.  It drives the panel's lines by hand, with no frame
-  buffer (MCUboot has some 14 KB of RAM left with 4 MB slots), powers the
-  LoRa radio through the XL9555 if it is off (unpowered, the radio loads
-  the shared bus), and does not wait for each partial refresh: the swap
-  takes about 3 s longer.  NuttX clears the panel when it starts.
+  "Installing the update" (or "Undoing the update"), a bar of ten blocks
+  that fill as the slots are swapped, and "Don't switch off", as the
+  device's interface design draws a task that takes a while.  The lines
+  are drawn beforehand in IBM Plex Sans by ``bootloader/mktext.py``
+  into ``progress_text.h``.  It drives the panel's lines by hand, with
+  no frame buffer (MCUboot has some 14 KB of RAM left with 4 MB slots),
+  powers the LoRa radio through the XL9555 if it is off (unpowered, the
+  radio loads the shared bus), and does not wait for each partial
+  refresh: the swap takes about 3 s longer.  NuttX clears the panel when
+  it starts.
 
 Power management
 ================

@@ -43,6 +43,8 @@
 #include <soc/gpio_sig_map.h>
 #include <soc/gpio_struct.h>
 
+#include "progress_text.h"        /* The lines, drawn beforehand (mktext.py) */
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -89,79 +91,35 @@
 #define EPD_PTIN        0x91
 #define EPD_PTOUT       0x92
 
-/* The screen: a title, the bar, a line below.  The bar's outline is two
- * pixels wide; inside it, the fill grows a byte (8 pixels) at a time, and
- * only the fill is refreshed, partially.
+/* The screen, as the device's interface design draws a task that takes a
+ * while: a title, a bar of ten blocks, a line below, from the left margin.
+ * The blocks fill one at a time, and only the bar is refreshed, partially,
+ * in a window aligned to bytes.
  */
 
-#define TITLE_Y         104   /* Its top; twice the font's size */
-#define LINE_Y          196
-#define BAR_X0          16    /* The outline: left, right past the last */
-#define BAR_X1          224
-#define BAR_Y0          148   /* Top, bottom past the last */
-#define BAR_Y1          176
-#define FILL_X0         24    /* The fill's room, byte aligned */
-#define FILL_X1         216
-#define FILL_Y0         154
-#define FILL_Y1         170
-#define FILL_BYTES      ((FILL_X1 - FILL_X0) / 8)
-
-/* The font: 5 x 9, the bottom two rows for descenders, only the letters
- * the screen needs: a row is the low five bits, the leftmost highest
- */
-
-#define FONT_W          5
-#define FONT_H          9
-#define FONT_ADVANCE    6
-
-/****************************************************************************
- * Private Types
- ****************************************************************************/
-
-struct text_s
-{
-  const char *text;
-  int x;
-  int y;
-  int scale;
-};
+#define TEXT_X          12
+#define TITLE_Y         124   /* The title's top */
+#define CAPTION_Y       172
+#define BAR_X           12
+#define BAR_Y           156
+#define BAR_W           216
+#define BAR_H           10
+#define BAR_GAP         2     /* Between blocks */
+#define BAR_BLOCKS      10
+#define WIN_X0          8     /* The bar's window */
+#define WIN_X1          232
+#define WIN_Y0          BAR_Y
+#define WIN_Y1          (BAR_Y + BAR_H)
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-/* The letters, and their rows in the same order */
-
-static const char g_font_chars[] = "IKUacdeghilnopstuv";
-
-static const uint8_t g_font[][FONT_H] =
-{
-  { 0x0e, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0e, 0x00, 0x00 },
-  { 0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11, 0x00, 0x00 },
-  { 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e, 0x00, 0x00 },
-  { 0x00, 0x00, 0x0e, 0x01, 0x0f, 0x11, 0x0f, 0x00, 0x00 },
-  { 0x00, 0x00, 0x0e, 0x10, 0x10, 0x11, 0x0e, 0x00, 0x00 },
-  { 0x01, 0x01, 0x0f, 0x11, 0x11, 0x11, 0x0f, 0x00, 0x00 },
-  { 0x00, 0x00, 0x0e, 0x11, 0x1f, 0x10, 0x0e, 0x00, 0x00 },
-  { 0x00, 0x00, 0x0f, 0x11, 0x11, 0x11, 0x0f, 0x01, 0x0e },
-  { 0x10, 0x10, 0x16, 0x19, 0x11, 0x11, 0x11, 0x00, 0x00 },
-  { 0x04, 0x00, 0x0c, 0x04, 0x04, 0x04, 0x0e, 0x00, 0x00 },
-  { 0x0c, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0e, 0x00, 0x00 },
-  { 0x00, 0x00, 0x16, 0x19, 0x11, 0x11, 0x11, 0x00, 0x00 },
-  { 0x00, 0x00, 0x0e, 0x11, 0x11, 0x11, 0x0e, 0x00, 0x00 },
-  { 0x00, 0x00, 0x1e, 0x11, 0x11, 0x11, 0x1e, 0x10, 0x10 },
-  { 0x00, 0x00, 0x0f, 0x10, 0x0e, 0x01, 0x1e, 0x00, 0x00 },
-  { 0x08, 0x08, 0x1c, 0x08, 0x08, 0x09, 0x06, 0x00, 0x00 },
-  { 0x00, 0x00, 0x11, 0x11, 0x11, 0x13, 0x0d, 0x00, 0x00 },
-  { 0x00, 0x00, 0x11, 0x11, 0x11, 0x0a, 0x04, 0x00, 0x00 },
-};
-
-static struct text_s g_title;
-static struct text_s g_line;
+static const struct text_s *g_title;
 
 static bool g_shown;          /* The screen drawn, at this start */
 static bool g_drawing;        /* A partial refresh started, not finished */
-static int g_fill;            /* The fill the panel shows, or is drawing */
+static int g_fill;            /* The blocks the panel shows, or is drawing */
 static uint32_t g_tenth;      /* The last tenth logged */
 
 /****************************************************************************
@@ -403,62 +361,48 @@ static bool epd_wait(int ms)
 
 /* The screen, a pixel at a time: black? */
 
-static bool text_black(const struct text_s *t, int x, int y)
+static bool text_black(const struct text_s *t, int x0, int y0, int x, int y)
 {
-  const char *c;
-  int gx;
-  int gy;
-  int i;
-
-  if (t->text == NULL || y < t->y || y >= t->y + FONT_H * t->scale ||
-      x < t->x)
+  if (t == NULL || x < x0 || x >= x0 + t->w || y < y0 || y >= y0 + t->h)
     {
       return false;
     }
 
-  gx = (x - t->x) / t->scale;
-  gy = (y - t->y) / t->scale;
-  c  = t->text + gx / FONT_ADVANCE;
-  for (i = 0; i <= gx / FONT_ADVANCE; i++)
-    {
-      if (t->text[i] == '\0')
-        {
-          return false;
-        }
-    }
-
-  gx %= FONT_ADVANCE;
-  if (gx >= FONT_W)
-    {
-      return false;
-    }
-
-  for (i = 0; g_font_chars[i] != '\0'; i++)
-    {
-      if (g_font_chars[i] == *c)
-        {
-          return (g_font[i][gy] >> (FONT_W - 1 - gx)) & 1;
-        }
-    }
-
-  return false;               /* A space */
+  x -= x0;
+  y -= y0;
+  return (t->bits[y * ((t->w + 7) / 8) + x / 8] >> (7 - x % 8)) & 1;
 }
 
 static bool screen_black(int x, int y, int fill)
 {
-  if (x >= BAR_X0 && x < BAR_X1 && y >= BAR_Y0 && y < BAR_Y1)
+  int block;
+  int bx0;
+  int bx1;
+
+  if (y >= BAR_Y && y < BAR_Y + BAR_H && x >= BAR_X && x < BAR_X + BAR_W)
     {
-      if (y < BAR_Y0 + 2 || y >= BAR_Y1 - 2 ||
-          x < BAR_X0 + 2 || x >= BAR_X1 - 2)
+      /* Which block, if any: each starts where its share of the width,
+       * gaps included, does
+       */
+
+      for (block = 0; block < BAR_BLOCKS; block++)
         {
-          return true;
+          bx0 = BAR_X + (block * (BAR_W + BAR_GAP) + BAR_BLOCKS / 2) /
+                BAR_BLOCKS;
+          bx1 = BAR_X + ((block + 1) * (BAR_W + BAR_GAP) + BAR_BLOCKS / 2) /
+                BAR_BLOCKS - BAR_GAP;
+          if (x >= bx0 && x < bx1)
+            {
+              return block < fill || x == bx0 || x == bx1 - 1 ||
+                     y == BAR_Y || y == BAR_Y + BAR_H - 1;
+            }
         }
 
-      return y >= FILL_Y0 && y < FILL_Y1 &&
-             x >= FILL_X0 && x < FILL_X0 + fill * 8;
+      return false;
     }
 
-  return text_black(&g_title, x, y) || text_black(&g_line, x, y);
+  return text_black(g_title, TEXT_X, TITLE_Y, x, y) ||
+         text_black(&g_caption, TEXT_X, CAPTION_Y, x, y);
 }
 
 static uint8_t screen_byte(int row, int col, int fill)
@@ -475,21 +419,6 @@ static uint8_t screen_byte(int row, int col, int fill)
     }
 
   return byte;
-}
-
-static void text_set(struct text_s *t, const char *text, int y, int scale)
-{
-  int len = 0;
-
-  while (text[len] != '\0')
-    {
-      len++;
-    }
-
-  t->text  = text;
-  t->scale = scale;
-  t->y     = y;
-  t->x     = (EPD_XRES - (len * FONT_ADVANCE - 1) * scale) / 2;
 }
 
 static void epd_data(int x0, int x1, int y0, int y1, int fill)
@@ -514,8 +443,8 @@ static void epd_window(void)
 {
   static const uint8_t args[7] =
   {
-    FILL_X0, FILL_X1 - 1, FILL_Y0 >> 8, FILL_Y0 & 0xff,
-    (FILL_Y1 - 1) >> 8, (FILL_Y1 - 1) & 0xff, 0x01
+    WIN_X0, WIN_X1 - 1, WIN_Y0 >> 8, WIN_Y0 & 0xff,
+    (WIN_Y1 - 1) >> 8, (WIN_Y1 - 1) & 0xff, 0x01
   };
 
   int i;
@@ -575,13 +504,13 @@ static void epd_partial_start(int fill)
   epd_cmd(EPD_PTIN);
   epd_window();
   epd_cmd(EPD_DTM1);
-  epd_data(FILL_X0, FILL_X1, FILL_Y0, FILL_Y1, g_fill);
+  epd_data(WIN_X0, WIN_X1, WIN_Y0, WIN_Y1, g_fill);
   epd_cmd(EPD_PTOUT);
 
   epd_cmd(EPD_PTIN);
   epd_window();
   epd_cmd(EPD_DTM2);
-  epd_data(FILL_X0, FILL_X1, FILL_Y0, FILL_Y1, fill);
+  epd_data(WIN_X0, WIN_X1, WIN_Y0, WIN_Y1, fill);
   epd_cmd(EPD_PTOUT);
 
   epd_cmd(EPD_PTIN);
@@ -622,9 +551,8 @@ static void show(int swap_type, int fill)
 
   lora_power();
 
-  text_set(&g_title, swap_type == BOOT_SWAP_TYPE_REVERT ? "Undoing update" :
-                     "Installing update", TITLE_Y, 2);
-  text_set(&g_line, "Keep the device on", LINE_Y, 1);
+  g_title = swap_type == BOOT_SWAP_TYPE_REVERT ? &g_title_undo :
+                                                 &g_title_update;
 
   gpio_ll_set_level(&GPIO, PIN_EPD_RST, 0);
   esp_rom_delay_us(10000);
@@ -642,8 +570,8 @@ static void show(int swap_type, int fill)
 
 /* Told after each step of a swap; the first time, at its start (or where
  * a resumed one has got to).  A step takes some 60 ms, a partial refresh
- * most of a second: one is started when the fill grows, and the swap goes
- * on meanwhile; a fill grown while the panel is busy waits for the next
+ * most of a second: one is started when a block fills, and the swap goes
+ * on meanwhile; a block filled while the panel is busy waits for the next
  * step.  At the end the last refresh is waited for, and the panel left
  * powered down, showing a full bar until NuttX clears it.
  */
@@ -658,7 +586,7 @@ void boot_swap_progress(int swap_type, uint32_t done, uint32_t total)
       return;
     }
 
-  fill  = done >= total ? FILL_BYTES : (int)(done * FILL_BYTES / total);
+  fill  = done >= total ? BAR_BLOCKS : (int)(done * BAR_BLOCKS / total);
   tenth = done * 10 / total;
 
   if (!g_shown)
