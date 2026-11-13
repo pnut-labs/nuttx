@@ -49,7 +49,7 @@
 
 /* Driver settings */
 
-#define SX126X_MAX_DEVICES          2
+#define SX126X_MAX_DEVICES          CONFIG_LPWAN_SX126X_MAX_DEVICES
 #define SX126X_SPI_SPEED            500000
 
 /* LoRa defaults */
@@ -75,6 +75,18 @@
  */
 
 #define SX126X_TX_TIMEOUT_MS              20000
+
+/* Longest a send waits for a packet being heard to end, while the chip
+ * listens: a 255 byte packet at SF11 and 250 kHz, with a margin.  A longer
+ * one is cut.
+ */
+
+#define SX126X_RX_END_MS                  5000
+
+/* A duty cycle's periods are counted in steps of 15.625 us, 24 bits */
+
+#define SX126X_DUTY_STEPS(us)             (((uint64_t)(us) * 64 + 999) / 1000)
+#define SX126X_DUTY_STEPS_MAX             0xffffff
 
 /* Longest the chip may stay busy: waking from sleep, calibrating */
 

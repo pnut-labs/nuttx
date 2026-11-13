@@ -34,13 +34,17 @@ See ``nuttx/wireless/lpwan/sx126x.h`` : ``SX126XIOC_x`` for the commands.
 
 * ``SX126XIOC_SYNCWORDSET`` takes a pointer to a ``uint16_t``: the LoRa sync word as the two bytes of the chip's register, most significant first. 0x1424 is the default (private networks), 0x3444 LoRaWAN's; the one byte sync word 0xXY of other LoRa chips corresponds to 0xX4Y4.
 
+* ``SX126XIOC_LISTENSET`` takes a pointer to a ``sx126x_listen_s``: the chip listens in the background, or stops. ``SX126X_LISTEN_CONTINUOUS`` receives all the time; ``SX126X_LISTEN_DUTY_CYCLE`` receives for ``rx_us``, then sleeps for ``sleep_us``, in turn (the chip's RX duty cycle, datasheet 13.1.7), and hears only senders whose preamble lasts longer than its sleep and one listen; ``SX126X_LISTEN_OFF`` stops, and drops the packets kept. A configuration set while it listens is used at once.
+
 Reading / Writing
 -----------------
 Reading and writing is done with the ``read`` and ``write`` functions.
 
-* ``write`` transmits the given bytes, 1 to 255 of them, using the IOCTL configured parameters, and returns once they are sent. It fails with ``-ETIMEDOUT`` if the chip does not finish within 20 seconds. **Does not support polling yet.**
+* ``write`` transmits the given bytes, 1 to 255 of them, using the IOCTL configured parameters, and returns once they are sent. It fails with ``-ETIMEDOUT`` if the chip does not finish within 20 seconds. While the chip listens, it first lets a packet being heard end (for at most 5 seconds), keeps a packet received, sends, then listens again.
 
-* ``read`` takes a pointer to ``sx126x_read_header_s``, and a buffer at least that large, and waits for a packet: the header holds its payload, the packet's RSSI in dBm and its SNR in 0.25 dB. *Note that packets are always received, even when the CRC (checked using ``.crc_error``) failed.*
+* ``read`` takes a pointer to ``sx126x_read_header_s``, and a buffer at least that large, and waits for a packet: the header holds its payload, the packet's RSSI in dBm and its SNR in 0.25 dB. *Note that packets are always received, even when the CRC (checked using ``.crc_error``) failed.* Not listening, it receives one packet, then stops. Listening, it returns the oldest packet kept: the driver keeps up to ``CONFIG_LPWAN_SX126X_RXQUEUE`` of them, dropping the oldest for a new one. It fails with ``-EAGAIN`` at once when none is kept and the file was opened with ``O_NONBLOCK``, and with ``-ECANCELED`` if listening stops while it waits.
+
+* ``poll`` reports ``POLLIN`` while the chip listens and a packet is kept, and when listening stops (a ``read`` then fails with ``-ECANCELED``); ``POLLOUT`` always.
 
 Board implementation
 ====================

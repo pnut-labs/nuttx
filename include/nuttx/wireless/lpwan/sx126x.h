@@ -70,6 +70,16 @@
 
 #define SX126XIOC_SYNCWORDSET               _WLCIOC(SX126X_FIRST+3)
 
+/* Listens in the background, or stops.  arg: struct sx126x_listen_s *.
+ * While it listens, the chip receives on its own and the driver keeps the
+ * packets heard, up to CONFIG_LPWAN_SX126X_RXQUEUE (the oldest is dropped
+ * for a new one); read() returns them one at a time, poll() reports them,
+ * and write() sends between them, then listens again.  A configuration
+ * set meanwhile is used at once.
+ */
+
+#define SX126XIOC_LISTENSET                 _WLCIOC(SX126X_FIRST+4)
+
 /* IRQ Register bits ********************************************************/
 
 #define SX126X_IRQ_TXDONE_MASK              (1<<0)
@@ -329,6 +339,26 @@ struct sx126x_packetparams_gfsk_s
   uint8_t packet_length;
   enum sx126x_gfsk_crc_type_e crc_type;
   bool whitening_enable;
+};
+
+/* How the chip listens (SX126XIOC_LISTENSET) */
+
+enum sx126x_listen_mode_e
+{
+  SX126X_LISTEN_OFF        = 0,   /* read() receives one packet, then stops */
+  SX126X_LISTEN_CONTINUOUS = 1,   /* Receiving all the time */
+  SX126X_LISTEN_DUTY_CYCLE = 2    /* Receiving for rx_us, asleep for
+                                   * sleep_us, in turn: it hears senders
+                                   * whose preamble lasts longer than a
+                                   * sleep and a listen (datasheet
+                                   * 13.1.7) */
+};
+
+struct sx126x_listen_s
+{
+  uint8_t mode;                   /* enum sx126x_listen_mode_e */
+  uint32_t rx_us;                 /* A duty cycle's listen, up to 262 s */
+  uint32_t sleep_us;              /* And its sleep, likewise */
 };
 
 /* Config */
