@@ -38,6 +38,7 @@
 #include <poll.h>
 #include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
+#include <nuttx/spinlock.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/wireless/ioctl.h>
 #include <sched.h>
@@ -112,16 +113,16 @@ struct sx126x_dev_s
   uint8_t rx_payload_len;                 /* A fixed header's, as set */
 
   /* Listening in the background (SX126XIOC_LISTENSET): the packets heard
-   * and not read, under qlock, which is taken after the SPI lock, never
-   * before.  receiving is set when a packet's header is heard, cleared
-   * (and rxend_sem posted) when the packet ends.
+   * and not read, and the poll waiters, under qspin, held only to copy;
+   * the chip is read before.  receiving is set when a packet's header is
+   * heard, cleared (and rxend_sem posted) when the packet ends.
    */
 
   struct sx126x_listen_s listen;
   volatile bool receiving;
   bool asleep;                            /* Closed: the worker leaves it */
   sem_t rxend_sem;
-  mutex_t qlock;
+  spinlock_t qspin;
   struct sx126x_read_header_s queue[CONFIG_LPWAN_SX126X_RXQUEUE];
   uint8_t qhead;
   uint8_t qcount;
@@ -626,12 +627,18 @@ static ssize_t sx126x_write(FAR struct file *filep,
   if (listening)
     {
       sx126x_spi_lock(dev);
-      if (sx126x_listen_arm(dev) < 0)
+      listening = sx126x_listen_arm(dev) >= 0;
+      if (!listening)
         {
-          wlerr("ERROR: The SX126x does not listen again\n");
+          dev->listen.mode = SX126X_LISTEN_OFF;
         }
 
       sx126x_spi_unlock(dev);
+      if (!listening)
+        {
+          wlerr("ERROR: The SX126x does not listen again\n");
+          sx126x_listen_flush(dev);
+        }
     }
 
   nxmutex_unlock(&dev->lock);
@@ -834,7 +841,16 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       sx126x_spi_lock(dev);
       sx126x_listen_drain(dev);
       ret = sx126x_listen_arm(dev);
+      if (ret < 0)
+        {
+          dev->listen.mode = SX126X_LISTEN_OFF;
+        }
+
       sx126x_spi_unlock(dev);
+      if (ret < 0)
+        {
+          sx126x_listen_flush(dev);
+        }
     }
 
   nxmutex_unlock(&dev->lock);
@@ -857,15 +873,11 @@ static int sx126x_poll(FAR struct file *filep, FAR struct pollfd *fds,
   FAR struct sx126x_dev_s *dev = filep->f_inode->i_private;
   FAR struct pollfd **slot;
   pollevent_t eventset;
-  int ret;
+  irqstate_t flags;
+  int ret = OK;
   int i;
 
-  ret = nxmutex_lock(&dev->qlock);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
+  flags = spin_lock_irqsave(&dev->qspin);
   if (setup)
     {
       for (i = 0; i < CONFIG_LPWAN_SX126X_NPOLLWAITERS; i++)
@@ -901,7 +913,7 @@ static int sx126x_poll(FAR struct file *filep, FAR struct pollfd *fds,
       fds->priv = NULL;
     }
 
-  nxmutex_unlock(&dev->qlock);
+  spin_unlock_irqrestore(&dev->qspin, flags);
   return ret;
 }
 
@@ -1860,38 +1872,45 @@ static int sx126x_listen_arm(FAR struct sx126x_dev_s *dev)
  * Name: sx126x_listen_take
  *
  * Description:
- *   Read the packet the chip received into the queue, dropping the oldest
- *   kept if it is full, and tell readers.  Called with the SPI locked.
+ *   Read the packet the chip received, then queue it, dropping the oldest
+ *   kept if the queue is full, and tell readers.  Called with the SPI
+ *   locked.
  *
  ****************************************************************************/
 
 static void sx126x_listen_take(FAR struct sx126x_dev_s *dev,
                                uint16_t irqbits)
 {
-  FAR struct sx126x_read_header_s *pkt;
+  struct sx126x_read_header_s pkt;
+  irqstate_t flags;
+  bool dropped = false;
   uint8_t status;
   uint8_t offset;
   int value;
 
-  nxmutex_lock(&dev->qlock);
+  sx126x_get_rx_buffer_status(dev, &status, &pkt.payload_length, &offset);
+  sx126x_read_buffer(dev, offset, pkt.payload, pkt.payload_length);
+  sx126x_get_packet_status_lora(dev, &pkt.rssi_db, &pkt.snr);
+  pkt.crc_error = (irqbits & SX126X_IRQ_CRCERR_MASK) != 0;
 
+  flags = spin_lock_irqsave(&dev->qspin);
   if (dev->qcount == CONFIG_LPWAN_SX126X_RXQUEUE)
     {
-      wlwarn("WARNING: SX126x packets not read: the oldest dropped\n");
       dev->qhead = (dev->qhead + 1) % CONFIG_LPWAN_SX126X_RXQUEUE;
       dev->qcount--;
+      dropped = true;
     }
 
-  pkt = &dev->queue[(dev->qhead + dev->qcount) %
-                    CONFIG_LPWAN_SX126X_RXQUEUE];
-  sx126x_get_rx_buffer_status(dev, &status, &pkt->payload_length, &offset);
-  sx126x_read_buffer(dev, offset, pkt->payload, pkt->payload_length);
-  sx126x_get_packet_status_lora(dev, &pkt->rssi_db, &pkt->snr);
-  pkt->crc_error = (irqbits & SX126X_IRQ_CRCERR_MASK) != 0;
+  memcpy(&dev->queue[(dev->qhead + dev->qcount) %
+                     CONFIG_LPWAN_SX126X_RXQUEUE], &pkt, sizeof(pkt));
   dev->qcount++;
-
   poll_notify(dev->fds, CONFIG_LPWAN_SX126X_NPOLLWAITERS, POLLIN);
-  nxmutex_unlock(&dev->qlock);
+  spin_unlock_irqrestore(&dev->qspin, flags);
+
+  if (dropped)
+    {
+      wlwarn("WARNING: SX126x packets not read: the oldest dropped\n");
+    }
 
   /* One post wakes a waiting reader; more would only pile up */
 
@@ -1961,11 +1980,13 @@ static void sx126x_listen_drain(FAR struct sx126x_dev_s *dev)
 
 static void sx126x_listen_flush(FAR struct sx126x_dev_s *dev)
 {
-  nxmutex_lock(&dev->qlock);
+  irqstate_t flags;
+
+  flags = spin_lock_irqsave(&dev->qspin);
   dev->qhead  = 0;
   dev->qcount = 0;
   poll_notify(dev->fds, CONFIG_LPWAN_SX126X_NPOLLWAITERS, POLLIN);
-  nxmutex_unlock(&dev->qlock);
+  spin_unlock_irqrestore(&dev->qspin, flags);
 
   nxsem_post(&dev->rx_sem);
 }
@@ -1984,26 +2005,22 @@ static ssize_t sx126x_read_queued(FAR struct sx126x_dev_s *dev,
                                   FAR struct file *filep,
                                   FAR struct sx126x_read_header_s *header)
 {
+  irqstate_t flags;
   int ret;
 
   for (; ; )
     {
-      ret = nxmutex_lock(&dev->qlock);
-      if (ret < 0)
-        {
-          return ret;
-        }
-
+      flags = spin_lock_irqsave(&dev->qspin);
       if (dev->qcount > 0)
         {
           memcpy(header, &dev->queue[dev->qhead], sizeof(*header));
           dev->qhead = (dev->qhead + 1) % CONFIG_LPWAN_SX126X_RXQUEUE;
           dev->qcount--;
-          nxmutex_unlock(&dev->qlock);
+          spin_unlock_irqrestore(&dev->qspin, flags);
           return sizeof(*header);
         }
 
-      nxmutex_unlock(&dev->qlock);
+      spin_unlock_irqrestore(&dev->qspin, flags);
 
       if (dev->listen.mode == SX126X_LISTEN_OFF)
         {
@@ -2207,7 +2224,7 @@ void sx126x_register(FAR struct spi_dev_s *spi,
   /* Initialize locks and semaphores */
 
   nxmutex_init(&dev->lock);
-  nxmutex_init(&dev->qlock);
+  spin_lock_init(&dev->qspin);
   nxsem_init(&dev->rx_sem, 0, 0);
   nxsem_init(&dev->tx_sem, 0, 0);
   nxsem_init(&dev->rxend_sem, 0, 0);
