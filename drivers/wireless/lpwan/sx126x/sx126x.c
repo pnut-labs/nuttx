@@ -1895,6 +1895,9 @@ static void sx126x_listen_take(FAR struct sx126x_dev_s *dev,
   uint8_t offset;
   int value;
 
+  /* Whole, past the payload too: a reader gets all of it */
+
+  memset(&pkt, 0, sizeof(pkt));
   sx126x_get_rx_buffer_status(dev, &status, &pkt.payload_length, &offset);
   sx126x_read_buffer(dev, offset, pkt.payload, pkt.payload_length);
   sx126x_get_packet_status_lora(dev, &pkt.rssi_db, &pkt.snr);
@@ -1932,21 +1935,40 @@ static void sx126x_listen_take(FAR struct sx126x_dev_s *dev,
  *
  * Description:
  *   Before a send while listening: let a packet being heard end, then
- *   drain the chip.  Called with dev->lock held.
+ *   drain the chip.  A header the chip heard counts before the worker
+ *   has seen it: the chip's status is read under the SPI lock, which the
+ *   worker holds while it updates receiving.  Called with dev->lock held.
  *
  ****************************************************************************/
 
 static void sx126x_listen_pause(FAR struct sx126x_dev_s *dev)
 {
-  while (nxsem_trywait(&dev->rxend_sem) == OK);
+  uint16_t irqbits;
+  bool hearing;
 
-  if (dev->receiving)
-    {
-      nxsem_tickwait_uninterruptible(&dev->rxend_sem,
-                                     MSEC2TICK(SX126X_RX_END_MS));
-    }
+  /* A packet's end posted before the lock is forgotten under it: the
+   * worker posts holding it
+   */
 
   sx126x_spi_lock(dev);
+  while (nxsem_trywait(&dev->rxend_sem) == OK);
+
+  sx126x_wake(dev);
+  sx126x_get_irq_status(dev, &irqbits);
+  hearing = dev->receiving ||
+            ((irqbits & SX126X_IRQ_HEADERVALID_MASK) != 0 &&
+             (irqbits & (SX126X_IRQ_RXDONE_MASK | SX126X_IRQ_HEADERERR_MASK |
+                         SX126X_IRQ_CRCERR_MASK |
+                         SX126X_IRQ_TIMEOUT_MASK)) == 0);
+
+  if (hearing)
+    {
+      sx126x_spi_unlock(dev);
+      nxsem_tickwait_uninterruptible(&dev->rxend_sem,
+                                     MSEC2TICK(SX126X_RX_END_MS));
+      sx126x_spi_lock(dev);
+    }
+
   sx126x_listen_drain(dev);
   sx126x_spi_unlock(dev);
 }
