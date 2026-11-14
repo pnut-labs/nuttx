@@ -398,6 +398,9 @@ struct imxrt_driver_s
   uint8_t  current_phy;         /* The index of the PHY being used */
   uint8_t  current_phy_address; /* The address of the PHY being used */
 #endif
+#ifdef CONFIG_IMXRT_ENET_FIXED_LINK
+  bool     fixed_link;          /* No PHY answered: 100 Mbps full duplex */
+#endif
   /* This holds the information visible to the NuttX network */
 
   struct net_driver_s dev;     /* Interface understood by the network */
@@ -987,6 +990,12 @@ static void imxrt_receive(struct imxrt_driver_s *priv)
 
   do
     {
+      if (imxrt_txringfull(priv))
+        {
+          priv->ints &= ~RX_INTERRUPTS;
+          break;
+        }
+
       /* Invalidate the Rx descriptor.  Since it has been modified via DMA,
        * we must assure that we must invalid any cached values and re-read
        * the descriptor from the memory.
@@ -1129,6 +1138,12 @@ static void imxrt_txdone(struct imxrt_driver_s *priv)
       priv->ints &= ~TX_INTERRUPTS;
       imxrt_enet_modifyreg32(priv, IMXRT_ENET_EIMR_OFFSET, TX_INTERRUPTS,
                              priv->ints);
+    }
+
+  if ((priv->ints & RX_INTERRUPTS) == 0)
+    {
+      priv->ints |= RX_INTERRUPTS;
+      imxrt_receive(priv);
     }
 
   /* There should be space for a new TX in any event.  Poll the network for
@@ -1416,16 +1431,38 @@ static int imxrt_ifup_action(struct net_driver_s *dev, bool resetphy)
 
   /* Configure the PHY */
 
+#ifdef CONFIG_IMXRT_ENET_FIXED_LINK
+  priv->fixed_link = false;
+#endif
+
 #if defined(CONFIG_ETH0_PHY_MULTI)
   ret = imxrt_determine_phy(priv);
   if (ret < 0)
     {
+#  ifdef CONFIG_IMXRT_ENET_FIXED_LINK
+      priv->fixed_link = true;
+#  else
       nerr("ERROR: Failed to determine the PHY: %d\n", ret);
       return ret;
+#  endif
     }
 #endif
 
   ret = imxrt_initphy(priv, resetphy);
+
+#ifdef CONFIG_IMXRT_ENET_FIXED_LINK
+  if (ret == -ENOENT && !priv->fixed_link)
+    {
+      priv->fixed_link = true;
+      ret = imxrt_initphy(priv, false);
+    }
+
+  if (priv->fixed_link)
+    {
+      nwarn("WARNING: no PHY answered, fixed 100 Mbps full duplex link\n");
+    }
+#endif
+
   if (ret < 0)
     {
       nerr("ERROR: Failed to configure the PHY: %d\n", ret);
@@ -1912,6 +1949,7 @@ static int imxrt_ioctl(struct net_driver_s *dev, int cmd, unsigned long arg)
         {
           struct mii_ioctl_data_s *req =
             (struct mii_ioctl_data_s *)((uintptr_t)arg);
+
           req->phy_id = priv->phyaddr;
           ret = OK;
         }
@@ -1921,6 +1959,16 @@ static int imxrt_ioctl(struct net_driver_s *dev, int cmd, unsigned long arg)
         {
           struct mii_ioctl_data_s *req =
             (struct mii_ioctl_data_s *)((uintptr_t)arg);
+#ifdef CONFIG_IMXRT_ENET_FIXED_LINK
+          if (priv->fixed_link)
+            {
+              req->val_out = req->reg_num == MII_MSR ?
+                             MII_MSR_LINKSTATUS | MII_MSR_100BASETXFULL : 0;
+              ret = OK;
+              break;
+            }
+#endif
+
 #if defined(CLAUSE45)
           if (
 #  if defined(CONFIG_ETH0_PHY_MULTI)
@@ -1944,6 +1992,7 @@ static int imxrt_ioctl(struct net_driver_s *dev, int cmd, unsigned long arg)
         {
           struct mii_ioctl_data_s *req =
             (struct mii_ioctl_data_s *)((uintptr_t)arg);
+
           ret = imxrt_writemii(priv, req->phy_id, req->reg_num, req->val_in);
         }
         break;
@@ -1982,7 +2031,8 @@ static int imxrt_phyintenable(struct imxrt_driver_s *priv)
 {
 #if defined(CONFIG_ETH0_PHY_KSZ8051) || defined(CONFIG_ETH0_PHY_KSZ8061) || \
     defined(CONFIG_ETH0_PHY_KSZ8081) || defined(CONFIG_ETH0_PHY_DP83825I) || \
-    defined(CONFIG_ETH0_YT8512)      || defined(CONFIG_ETH0_PHY_MULTI)
+    defined(CONFIG_ETH0_YT8512)      || defined(CONFIG_ETH0_PHY_LAN8720) || \
+    defined(CONFIG_ETH0_PHY_LAN8742A) || defined(CONFIG_ETH0_PHY_MULTI)
 
   uint16_t phyval;
   int ret;
@@ -2000,13 +2050,27 @@ static int imxrt_phyintenable(struct imxrt_driver_s *priv)
   wreg  = MII_YT8512_IMR;
 #  endif
 
-  /* Run time YT8512 defaults */
+  /* Compile time LAN8720/LAN8742A defaults */
+#  if defined(CONFIG_ETH0_PHY_LAN8720) || defined(CONFIG_ETH0_PHY_LAN8742A)
+  mask = MII_LAN8720_INT_LINKDOWN | MII_LAN8720_INT_ANCOMPLETE;
+  rreg = MII_LAN8720_ISR;
+  wreg = MII_LAN8720_IMR;
+#  endif
+
+  /* Run time YT8512 and LAN8720/LAN8742A defaults */
 #  if defined(CONFIG_ETH0_PHY_MULTI)
   if (imxrt_phy_is(priv, MII_YT8512_NAME))
     {
       mask = MII_YT8512_IMR_LD_EN | MII_YT8512_IMR_LU_EN;
       rreg  = MII_YT8512_ISR;
       wreg  = MII_YT8512_IMR;
+    }
+  else if (imxrt_phy_is(priv, MII_LAN8720_NAME) ||
+           imxrt_phy_is(priv, MII_LAN8742A_NAME))
+    {
+      mask = MII_LAN8720_INT_LINKDOWN | MII_LAN8720_INT_ANCOMPLETE;
+      rreg = MII_LAN8720_ISR;
+      wreg = MII_LAN8720_IMR;
     }
   else if (!(imxrt_phy_is(priv, MII_KSZ8051_NAME) ||
              imxrt_phy_is(priv, MII_KSZ8061_NAME) ||
@@ -2300,6 +2364,7 @@ static int imxrt_phy_status(struct imxrt_driver_s *priv, int phydata,
                             uint16_t mask)
 {
   int rv = mask;
+
   if (g_board_phys[priv->current_phy].status != 0xffff)
     {
       rv &= phydata;
@@ -2536,6 +2601,16 @@ static inline int imxrt_initphy(struct imxrt_driver_s *priv, bool renogphy)
   uint8_t phyaddr    = BOARD_PHY_ADDR;
   int retries;
   int ret;
+  bool fixed = false;
+
+#ifdef CONFIG_IMXRT_ENET_FIXED_LINK
+  fixed = priv->fixed_link;
+  phydata = 0;
+  if (fixed)
+    {
+      goto mac_setup;
+    }
+#endif
 
   if (renogphy)
     {
@@ -2717,7 +2792,7 @@ static inline int imxrt_initphy(struct imxrt_driver_s *priv, bool renogphy)
 
 #if defined(CONFIG_ETH0_PHY_YT8512) || defined(CONFIG_ETH0_PHY_MULTI)
 #  if defined(CONFIG_ETH0_PHY_MULTI)
-      if (!imxrt_phy_is(priv, MII_YT8512_NAME))
+      if (imxrt_phy_is(priv, MII_YT8512_NAME))
         {
 #  endif
           /* Reset PHY */
@@ -2865,6 +2940,10 @@ static inline int imxrt_initphy(struct imxrt_driver_s *priv, bool renogphy)
 #  endif
 #endif
 
+#ifdef CONFIG_IMXRT_ENET_FIXED_LINK
+mac_setup:
+#endif
+
   /* Set up the transmit and receive control registers based on the
    * configuration and the auto negotiation results.
    */
@@ -2895,7 +2974,7 @@ static inline int imxrt_initphy(struct imxrt_driver_s *priv, bool renogphy)
 
   /* Setup half or full duplex */
 
-  if (BOARD_PHY_ISDUPLEX(phydata))
+  if (fixed || BOARD_PHY_ISDUPLEX(phydata))
     {
       /* Full duplex */
 
@@ -2910,14 +2989,14 @@ static inline int imxrt_initphy(struct imxrt_driver_s *priv, bool renogphy)
       rcr |= ENET_RCR_DRT;
     }
 
-  if (BOARD_PHY_10BASET(phydata))
+  if (!fixed && BOARD_PHY_10BASET(phydata))
     {
       /* 10 Mbps */
 
       ninfo("%s: 10 Base-T\n",  BOARD_PHY_NAME);
       rcr |= ENET_RCR_RMII_10T;
     }
-  else if (BOARD_PHY_100BASET(phydata))
+  else if (fixed || BOARD_PHY_100BASET(phydata))
     {
       /* 100 Mbps */
 
@@ -3130,7 +3209,7 @@ int imxrt_netinitialize(int intf)
   imxrt_config_gpio(GPIO_ENET_TX_CLK);
   imxrt_config_gpio(GPIO_ENET_TX_EN);
 #  ifdef GPIO_ENET_RX_ER
-    imxrt_config_gpio(GPIO_ENET_RX_ER);
+  imxrt_config_gpio(GPIO_ENET_RX_ER);
 #  endif
 #endif
 
@@ -3145,7 +3224,7 @@ int imxrt_netinitialize(int intf)
   imxrt_config_gpio(GPIO_ENET2_TX_CLK);
   imxrt_config_gpio(GPIO_ENET2_TX_EN);
 #  ifdef GPIO_ENET2_RX_ER
-    imxrt_config_gpio(GPIO_ENET2_RX_ER);
+  imxrt_config_gpio(GPIO_ENET2_RX_ER);
 #  endif
 #endif
 

@@ -687,8 +687,37 @@ static FAR netpkt_t *e1000_receive(FAR struct netdev_lowerhalf_s *dev)
   priv->rx_pkt[desc] = netpkt_alloc(dev, NETPKT_RX);
   if (priv->rx_pkt[desc] == NULL)
     {
-      nerr("alloc pkt_new failed\n");
-      PANIC();
+      int i;
+
+      /* No free packet (e.g. the IOBs are held by the stack): drop this
+       * frame and the other received frames in the ring and give the
+       * descriptors their packets back, so that the ring keeps receiving
+       * and the next interrupt starts a new RX poll.  Stop after one pass
+       * over the ring, so that the stack can run and free packets.
+       */
+
+      priv->rx_pkt[desc] = pkt;
+
+      for (i = 0; i < E1000_RX_DESC; i++)
+        {
+          NETDEV_RXDROPPED(&priv->dev.netdev);
+
+          rx->len    = 0;
+          rx->status = 0;
+
+          e1000_putreg_mem(priv, E1000_RDT, desc);
+
+          desc = priv->rx_now;
+          rx   = &priv->rx[desc];
+          if (!(rx->status & E1000_RDESC_STATUS_DD))
+            {
+              break;
+            }
+
+          priv->rx_now = (priv->rx_now + 1) % E1000_RX_DESC;
+        }
+
+      return NULL;
     }
 
   /* Set packet length */
@@ -1330,6 +1359,17 @@ static void e1000_enable(FAR struct e1000_driver_s *priv)
 
   e1000_rxclean(priv);
 
+#ifdef CONFIG_PCI_MSIX
+  /* Configure MSI-X.  Done on every enable, not once at probe, because
+   * the reset in e1000_disable() clears IVAR.
+   */
+
+  if (priv->type->flags & E1000_HAS_MSIX)
+    {
+      e1000_putreg_mem(priv, E1000_IVAR, E1000_MSIX_IVAR);
+    }
+#endif
+
   /* Enable interrupts */
 
   e1000_putreg_mem(priv, E1000_IMS, priv->irqs);
@@ -1414,11 +1454,10 @@ static int e1000_initialize(FAR struct e1000_driver_s *priv)
   irq_attach(priv->irq, e1000_interrupt, priv);
 
 #ifdef CONFIG_PCI_MSIX
-  /* Configure MSI-X */
+  /* Select the MSI-X interrupt causes, IVAR is set in e1000_enable() */
 
   if (priv->type->flags & E1000_HAS_MSIX)
     {
-      e1000_putreg_mem(priv, E1000_IVAR, E1000_MSIX_IVAR);
       priv->irqs = E1000_MSIX_INTERRUPTS;
     }
   else

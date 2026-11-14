@@ -36,6 +36,7 @@
 #include <nuttx/addrenv.h>
 #include <nuttx/spinlock.h>
 
+#include <nuttx/net/mii.h>
 #include <nuttx/net/netdev_lowerhalf.h>
 #include <nuttx/pci/pci.h>
 #include <nuttx/net/igb.h>
@@ -662,8 +663,37 @@ static FAR netpkt_t *igb_receive(FAR struct netdev_lowerhalf_s *dev)
   priv->rx_pkt[desc] = netpkt_alloc(dev, NETPKT_RX);
   if (priv->rx_pkt[desc] == NULL)
     {
-      nerr("alloc pkt_new failed\n");
-      PANIC();
+      int i;
+
+      /* No free packet (e.g. the IOBs are held by the stack): drop this
+       * frame and the other received frames in the ring and give the
+       * descriptors their packets back, so that the ring keeps receiving
+       * and the next interrupt starts a new RX poll.  Stop after one pass
+       * over the ring, so that the stack can run and free packets.
+       */
+
+      priv->rx_pkt[desc] = pkt;
+
+      for (i = 0; i < IGB_RX_DESC; i++)
+        {
+          NETDEV_RXDROPPED(&priv->dev.netdev);
+
+          rx->len    = 0;
+          rx->status = 0;
+
+          igb_putreg_mem(priv, IGB_RDT0, desc);
+
+          desc = priv->rx_now;
+          rx   = &priv->rx[desc];
+          if (!(rx->status & IGB_RDESC_STATUS_DD))
+            {
+              break;
+            }
+
+          priv->rx_now = (priv->rx_now + 1) % IGB_RX_DESC;
+        }
+
+      return NULL;
     }
 
   /* Set packet length */
@@ -1156,6 +1186,70 @@ static void igb_phy_reset(FAR struct igb_driver_s *priv)
 }
 
 /*****************************************************************************
+ * Name: igb_mdic
+ *
+ * Description:
+ *   Run one MDI read or write cycle on the internal PHY.
+ *
+ *****************************************************************************/
+
+static int igb_mdic(FAR struct igb_driver_s *priv, uint32_t op, int reg,
+                    FAR uint16_t *data)
+{
+  uint32_t regval;
+  int      i;
+
+  igb_putreg_mem(priv, IGB_MDIC,
+                 op | (IGB_PHY_ADDR << IGB_MDIC_PHYADD_SHIFT) |
+                 (reg << IGB_MDIC_REGADD_SHIFT) | *data);
+
+  for (i = 0; i < 1000; i++)
+    {
+      regval = igb_getreg_mem(priv, IGB_MDIC);
+      if (regval & IGB_MDIC_READY)
+        {
+          if (regval & IGB_MDIC_ERROR)
+            {
+              return -EIO;
+            }
+
+          *data = regval & IGB_MDIC_DATA_MASK;
+          return OK;
+        }
+
+      up_udelay(50);
+    }
+
+  return -ETIMEDOUT;
+}
+
+/*****************************************************************************
+ * Name: igb_phy_autoneg
+ *
+ * Description:
+ *   Restart PHY auto-negotiation.
+ *
+ *****************************************************************************/
+
+static void igb_phy_autoneg(FAR struct igb_driver_s *priv)
+{
+  uint16_t bmcr = 0;
+  int      ret;
+
+  ret = igb_mdic(priv, IGB_MDIC_OP_READ, MII_MCR, &bmcr);
+  if (ret == OK)
+    {
+      bmcr |= MII_MCR_ANENABLE | MII_MCR_ANRESTART;
+      ret = igb_mdic(priv, IGB_MDIC_OP_WRITE, MII_MCR, &bmcr);
+    }
+
+  if (ret != OK)
+    {
+      nerr("PHY auto-negotiation restart failed %d\n", ret);
+    }
+}
+
+/*****************************************************************************
  * Name: igb_enable
  *
  * Description:
@@ -1232,6 +1326,21 @@ static void igb_enable(FAR struct igb_driver_s *priv)
   regval = IGB_RX_DESC * sizeof(struct igb_rx_leg_s);
   igb_putreg_mem(priv, IGB_RDLEN0, regval);
 
+  /* Configure MSI-X.  Done on every enable, not once at probe, because
+   * the reset in igb_disable() clears IVAR and GPIE.
+   */
+
+  igb_putreg_mem(priv, IGB_IVAR0, IGB_MSIX_IVAR0);
+  igb_putreg_mem(priv, IGB_IVARMSC, IGB_MSIX_IVARMSC);
+
+  /* Enable MSI-X Single Vector */
+
+  igb_putreg_mem(priv, IGB_GPIE, IGB_GPIE_MSIX_SINGLE);
+
+  /* Configure Interrupt Throttle */
+
+  igb_putreg_mem(priv, IGB_EITR0, (CONFIG_NET_IGB_INT_INTERVAL << 2));
+
   /* Enable interrupts */
 
   igb_putreg_mem(priv, IGB_EIMS, IGB_MSIX_EIMS);
@@ -1241,6 +1350,12 @@ static void igb_enable(FAR struct igb_driver_s *priv)
   /* Set link up */
 
   igb_putreg_mem(priv, IGB_CTRL, IGB_CTRL_SLU);
+
+  /* Restart auto-negotiation.  The link comes up when it completes,
+   * signalled by the link status change interrupt.
+   */
+
+  igb_phy_autoneg(priv);
 
   /* Setup and enable Transmitter */
 
@@ -1322,24 +1437,6 @@ static int igb_initialize(FAR struct igb_driver_s *priv)
 
   igb_putreg_mem(priv, IGB_EIMC, 0xffffffff);
   igb_putreg_mem(priv, IGB_IMC, 0xffffffff);
-
-  /* Configure MSI-X */
-
-  igb_putreg_mem(priv, IGB_IVAR0, IGB_MSIX_IVAR0);
-  igb_putreg_mem(priv, IGB_IVARMSC, IGB_MSIX_IVARMSC);
-
-  /* Enable MSI-X Single Vector */
-
-  igb_putreg_mem(priv, IGB_GPIE, IGB_GPIE_MSIX_SINGLE);
-  igb_putreg_mem(priv, IGB_EIMS, IGB_MSIX_EIMS);
-
-  /* Configure Other causes */
-
-  igb_putreg_mem(priv, IGB_IMS, IGB_MSIX_IMS);
-
-  /* Configure Interrupt Throttle */
-
-  igb_putreg_mem(priv, IGB_EITR0, (CONFIG_NET_IGB_INT_INTERVAL << 2));
 
   /* Get MAC if valid */
 
