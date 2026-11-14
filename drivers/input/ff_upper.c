@@ -322,10 +322,38 @@ static int ff_open(FAR struct file *filep)
 
 /****************************************************************************
  * Name: ff_close
+ *
+ * Description:
+ *   Erase the effects the closed file uploaded, as Linux does: else a
+ *   program that ends without erasing them (it crashed) leaves them in the
+ *   device's slots for good, and a later file at the same address would
+ *   own them.
+ *
  ****************************************************************************/
 
 static int ff_close(FAR struct file *filep)
 {
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct ff_upperhalf_s *upper = inode->i_private;
+  int i;
+
+  nxmutex_lock(&upper->lock);
+
+  for (i = 0; i < upper->max_effects; i++)
+    {
+      if (upper->effects[i].owner == filep)
+        {
+          ff_erase_effect(upper, i, filep);
+
+          /* Not the file's any more, even if the device would not erase
+           * it: no later file may take it over
+           */
+
+          upper->effects[i].owner = NULL;
+        }
+    }
+
+  nxmutex_unlock(&upper->lock);
   return OK;
 }
 
