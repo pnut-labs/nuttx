@@ -45,6 +45,11 @@
  * given by the board when the first sensor is activated, and leaves it
  * running.  The accelerometer and the gyroscope are the firmware's
  * passthrough sensors, with its default ranges of 8 g and 2000 deg/s.
+ *
+ * Besides them, the firmware works out "virtual sensors" from the
+ * readings: steps, gestures, stillness, activity.  Which ones an image has
+ * is known only once it runs: every topic is registered, and one the image
+ * lacks fails to activate with -ENODEV.
  ****************************************************************************/
 
 /****************************************************************************
@@ -55,6 +60,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <errno.h>
 #include <math.h>
@@ -115,6 +121,8 @@
 #define BHI_CMD_BOOT_RAM        0x0003
 #define BHI_CMD_CONFIG_SENSOR   0x000d
 #define BHI_PARAM_READ          0x1000
+#define BHI_PARAM_PRESENT       0x011f    /* A bit per virtual sensor */
+#define BHI_PARAM_PRESENT_SIZE  32
 #define BHI_PARAM_SENSOR_INFO   0x0300
 #define BHI_SENSOR_INFO_SIZE    28
 #define BHI_SENSOR_INFO_EVSIZE  20
@@ -123,6 +131,20 @@
 
 #define BHI_ID_ACC              1         /* Accelerometer passthrough */
 #define BHI_ID_GYRO             10        /* Gyroscope passthrough */
+#define BHI_ID_TILT             48
+#define BHI_ID_STEP_COUNTER     52
+#define BHI_ID_GLANCE           59
+#define BHI_ID_PICKUP           61
+#define BHI_ID_ACTIVITY         63
+#define BHI_ID_STATIONARY       75
+#define BHI_ID_MOTION           77
+
+/* What a virtual sensor's event holds after its id */
+
+#define BHI_DATA_AXES           0         /* x, y, z: int16 each */
+#define BHI_DATA_EVENT          1         /* Nothing: it happened */
+#define BHI_DATA_COUNT          2         /* uint32 */
+#define BHI_DATA_BITS           3         /* uint16 */
 
 /* System events in the FIFOs, and their sizes including the id */
 
@@ -141,15 +163,16 @@
 #define BHI_BOOT_TRIES          100       /* x 50 ms */
 #define BHI_STATUS_TRIES        50        /* x 10 ms */
 
-/* Default rate, and units */
+/* Default rates, and units */
 
-#define BHI_DEFAULT_RATE        50.0f     /* Hz */
+#define BHI_DEFAULT_RATE        50.0f     /* Hz, of the readings */
+#define BHI_EVENT_RATE          1.0f      /* Hz, of the others */
 #define BHI_ACC_SCALE           (9.80665f / 4096.0f)
 #define BHI_GYRO_SCALE          (2000.0f / 32768.0f * (float)M_PI / 180.0f)
 
-#define BHI_ACC                 0
-#define BHI_GYRO                1
-#define BHI_NSENSORS            2
+#define BHI_LATENCY_MAX         0xffffff  /* ms, the command's 24 bits */
+
+#define BHI_NSENSORS            9
 
 /****************************************************************************
  * Private Types
@@ -157,14 +180,30 @@
 
 struct bhi260ap_dev_s;
 
+/* A virtual sensor this driver offers: a uORB type, or a topic of its own
+ * (SENSOR_TYPE_CUSTOM) of struct sensor_event, named here
+ */
+
+struct bhi260ap_kind_s
+{
+  uint8_t id;                       /* The firmware's */
+  uint8_t type;                     /* uORB's */
+  uint8_t data;                     /* BHI_DATA_* */
+  uint8_t minsize;                  /* Its event's size at least, the id
+                                     * included */
+  FAR const char *name;             /* A custom topic's */
+};
+
 struct bhi260ap_sensor_s
 {
   struct sensor_lowerhalf_s lower;  /* Must be first */
   FAR struct bhi260ap_dev_s *dev;
-  uint8_t id;                       /* Virtual sensor id */
-  uint8_t evsize;                   /* Its event size, id included */
+  FAR const struct bhi260ap_kind_s *kind;
+  uint8_t evsize;                   /* Its event size, id included; 0 while
+                                     * the firmware lacks it */
   bool enabled;
   float rate;                       /* Hz */
+  uint32_t latency;                 /* ms the chip may hold its events */
 };
 
 struct bhi260ap_dev_s
@@ -187,10 +226,48 @@ static int bhi260ap_activate(FAR struct sensor_lowerhalf_s *lower,
 static int bhi260ap_set_interval(FAR struct sensor_lowerhalf_s *lower,
                                  FAR struct file *filep,
                                  FAR uint32_t *period_us);
+static int bhi260ap_batch(FAR struct sensor_lowerhalf_s *lower,
+                          FAR struct file *filep,
+                          FAR uint32_t *latency_us);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
+
+/* The virtual sensors offered, the first two the readings */
+
+static const struct bhi260ap_kind_s g_bhi_kinds[BHI_NSENSORS] =
+{
+  {
+    BHI_ID_ACC, SENSOR_TYPE_ACCELEROMETER, BHI_DATA_AXES, 7, NULL
+  },
+  {
+    BHI_ID_GYRO, SENSOR_TYPE_GYROSCOPE, BHI_DATA_AXES, 7, NULL
+  },
+  {
+    BHI_ID_TILT, SENSOR_TYPE_TILT_DETECTOR, BHI_DATA_EVENT, 1, NULL
+  },
+  {
+    BHI_ID_STEP_COUNTER, SENSOR_TYPE_STEP_COUNTER, BHI_DATA_COUNT, 5, NULL
+  },
+  {
+    BHI_ID_GLANCE, SENSOR_TYPE_GLANCE_GESTURE, BHI_DATA_EVENT, 1, NULL
+  },
+  {
+    BHI_ID_PICKUP, SENSOR_TYPE_PICK_UP_GESTURE, BHI_DATA_EVENT, 1, NULL
+  },
+  {
+    BHI_ID_MOTION, SENSOR_TYPE_MOTION_DETECT, BHI_DATA_EVENT, 1, NULL
+  },
+  {
+    BHI_ID_STATIONARY, SENSOR_TYPE_CUSTOM, BHI_DATA_EVENT, 1,
+    BHI260AP_STATIONARY
+  },
+  {
+    BHI_ID_ACTIVITY, SENSOR_TYPE_CUSTOM, BHI_DATA_BITS, 3,
+    BHI260AP_ACTIVITY
+  },
+};
 
 /* The sizes of the system events, including the id */
 
@@ -213,6 +290,7 @@ static const struct sensor_ops_s g_bhi260ap_ops =
 {
   .activate     = bhi260ap_activate,
   .set_interval = bhi260ap_set_interval,
+  .batch        = bhi260ap_batch,
 };
 
 /****************************************************************************
@@ -389,13 +467,13 @@ static int bhi260ap_get_parameter(FAR struct bhi260ap_dev_s *dev,
  * Name: bhi260ap_configure
  *
  * Description:
- *   Set a virtual sensor's rate: 0 stops it.  Events are reported as they
- *   come (no latency).
+ *   Set a virtual sensor's rate, 0 to stop it, and how long the chip may
+ *   hold its events before it tells the host (0: as they come).
  *
  ****************************************************************************/
 
 static int bhi260ap_configure(FAR struct bhi260ap_dev_s *dev, uint8_t id,
-                              float rate)
+                              float rate, uint32_t latency)
 {
   uint8_t payload[8];
   uint32_t bits;
@@ -407,19 +485,44 @@ static int bhi260ap_configure(FAR struct bhi260ap_dev_s *dev, uint8_t id,
   payload[2] = bits >> 8;
   payload[3] = bits >> 16;
   payload[4] = bits >> 24;
-  payload[5] = 0;
-  payload[6] = 0;
-  payload[7] = 0;
+  payload[5] = latency;
+  payload[6] = latency >> 8;
+  payload[7] = latency >> 16;
 
   return bhi260ap_command(dev, BHI_CMD_CONFIG_SENSOR, payload,
                           sizeof(payload));
 }
 
 /****************************************************************************
+ * Name: bhi260ap_find
+ *
+ * Description:
+ *   The sensor with this virtual sensor id that the firmware has, or NULL.
+ *
+ ****************************************************************************/
+
+static FAR struct bhi260ap_sensor_s *
+bhi260ap_find(FAR struct bhi260ap_dev_s *dev, uint8_t id)
+{
+  int i;
+
+  for (i = 0; i < BHI_NSENSORS; i++)
+    {
+      if (dev->sensor[i].kind->id == id && dev->sensor[i].evsize > 0)
+        {
+          return &dev->sensor[i];
+        }
+    }
+
+  return NULL;
+}
+
+/****************************************************************************
  * Name: bhi260ap_event
  *
  * Description:
- *   Pass one sensor event on.
+ *   Pass one sensor event on.  Its whole size is in the buffer, the size
+ *   bhi260ap_event_size() gave, which is the kind's at least.
  *
  ****************************************************************************/
 
@@ -427,46 +530,77 @@ static void bhi260ap_event(FAR struct bhi260ap_dev_s *dev,
                            FAR const uint8_t *event, uint64_t timestamp)
 {
   FAR struct bhi260ap_sensor_s *sensor;
-  float x;
-  float y;
-  float z;
+  FAR const uint8_t *data = &event[1];
 
-  /* Only the sensors' events have the three axes: the system events can
-   * be as short as one byte, at the end of what was read
+  /* The system events, which can be as short as one byte at the end of
+   * what was read, are not passed on
    */
 
-  if (event[0] != BHI_ID_ACC && event[0] != BHI_ID_GYRO)
+  sensor = bhi260ap_find(dev, event[0]);
+  if (sensor == NULL)
     {
       return;
     }
 
-  x = (int16_t)(event[1] | (event[2] << 8));
-  y = (int16_t)(event[3] | (event[4] << 8));
-  z = (int16_t)(event[5] | (event[6] << 8));
-
-  if (event[0] == BHI_ID_ACC)
+  switch (sensor->kind->data)
     {
-      struct sensor_accel accel;
+      case BHI_DATA_AXES:
+        {
+          float x = (int16_t)(data[0] | (data[1] << 8));
+          float y = (int16_t)(data[2] | (data[3] << 8));
+          float z = (int16_t)(data[4] | (data[5] << 8));
 
-      sensor            = &dev->sensor[BHI_ACC];
-      accel.timestamp   = timestamp;
-      accel.x           = x * BHI_ACC_SCALE;
-      accel.y           = y * BHI_ACC_SCALE;
-      accel.z           = z * BHI_ACC_SCALE;
-      accel.temperature = NAN;
-      sensor->lower.push_event(sensor->lower.priv, &accel, sizeof(accel));
-    }
-  else if (event[0] == BHI_ID_GYRO)
-    {
-      struct sensor_gyro gyro;
+          if (sensor->kind->type == SENSOR_TYPE_ACCELEROMETER)
+            {
+              struct sensor_accel accel;
 
-      sensor           = &dev->sensor[BHI_GYRO];
-      gyro.timestamp   = timestamp;
-      gyro.x           = x * BHI_GYRO_SCALE;
-      gyro.y           = y * BHI_GYRO_SCALE;
-      gyro.z           = z * BHI_GYRO_SCALE;
-      gyro.temperature = NAN;
-      sensor->lower.push_event(sensor->lower.priv, &gyro, sizeof(gyro));
+              accel.timestamp   = timestamp;
+              accel.x           = x * BHI_ACC_SCALE;
+              accel.y           = y * BHI_ACC_SCALE;
+              accel.z           = z * BHI_ACC_SCALE;
+              accel.temperature = NAN;
+              sensor->lower.push_event(sensor->lower.priv, &accel,
+                                       sizeof(accel));
+            }
+          else
+            {
+              struct sensor_gyro gyro;
+
+              gyro.timestamp   = timestamp;
+              gyro.x           = x * BHI_GYRO_SCALE;
+              gyro.y           = y * BHI_GYRO_SCALE;
+              gyro.z           = z * BHI_GYRO_SCALE;
+              gyro.temperature = NAN;
+              sensor->lower.push_event(sensor->lower.priv, &gyro,
+                                       sizeof(gyro));
+            }
+        }
+        break;
+
+      case BHI_DATA_COUNT:
+        {
+          struct sensor_step_counter steps;
+
+          steps.timestamp = timestamp;
+          steps.steps     = (uint32_t)data[0] | ((uint32_t)data[1] << 8) |
+                            ((uint32_t)data[2] << 16) |
+                            ((uint32_t)data[3] << 24);
+          steps.cadence   = 0;
+          sensor->lower.push_event(sensor->lower.priv, &steps,
+                                   sizeof(steps));
+        }
+        break;
+
+      default:
+        {
+          struct sensor_event ev;
+
+          ev.timestamp = timestamp;
+          ev.event     = sensor->kind->data == BHI_DATA_BITS ?
+                         (uint32_t)(data[0] | (data[1] << 8)) : 1;
+          sensor->lower.push_event(sensor->lower.priv, &ev, sizeof(ev));
+        }
+        break;
     }
 }
 
@@ -494,7 +628,7 @@ static int bhi260ap_event_size(FAR struct bhi260ap_dev_s *dev, uint8_t id)
 
   for (i = 0; i < BHI_NSENSORS; i++)
     {
-      if (dev->sensor[i].id == id)
+      if (dev->sensor[i].kind->id == id && dev->sensor[i].evsize > 0)
         {
           return dev->sensor[i].evsize;
         }
@@ -723,6 +857,7 @@ static int bhi260ap_interrupt(int irq, FAR void *context, FAR void *arg)
 static int bhi260ap_boot(FAR struct bhi260ap_dev_s *dev)
 {
   const uint8_t reset = 0x01;
+  uint8_t present[BHI_PARAM_PRESENT_SIZE];
   uint8_t info[BHI_SENSOR_INFO_SIZE];
   uint8_t status;
   uint8_t version[2];
@@ -799,19 +934,38 @@ static int bhi260ap_boot(FAR struct bhi260ap_dev_s *dev)
   bhi260ap_drain(dev, BHI_REG_CHAN_FIFO_W);
   bhi260ap_drain(dev, BHI_REG_CHAN_FIFO_NW);
 
+  /* Which of the virtual sensors offered this image has, and the sizes of
+   * their events
+   */
+
+  ret = bhi260ap_get_parameter(dev, BHI_PARAM_PRESENT, present,
+                               sizeof(present));
+  if (ret != BHI_PARAM_PRESENT_SIZE)
+    {
+      snerr("ERROR: The firmware's sensors unknown: %d\n", ret);
+      return ret < 0 ? ret : -EIO;
+    }
+
   for (i = 0; i < BHI_NSENSORS; i++)
     {
       FAR struct bhi260ap_sensor_s *sensor = &dev->sensor[i];
+      uint8_t id = sensor->kind->id;
 
-      ret = bhi260ap_get_parameter(dev, BHI_PARAM_SENSOR_INFO + sensor->id,
-                                   info, sizeof(info));
-      if (ret != BHI_SENSOR_INFO_SIZE || info[0] != sensor->id ||
-          info[BHI_SENSOR_INFO_EVSIZE] < 7 ||
+      sensor->evsize = 0;
+      if ((present[id / 8] & (1 << (id % 8))) == 0)
+        {
+          sninfo("The firmware has no sensor %u\n", id);
+          continue;
+        }
+
+      ret = bhi260ap_get_parameter(dev, BHI_PARAM_SENSOR_INFO + id, info,
+                                   sizeof(info));
+      if (ret != BHI_SENSOR_INFO_SIZE || info[0] != id ||
+          info[BHI_SENSOR_INFO_EVSIZE] < sensor->kind->minsize ||
           info[BHI_SENSOR_INFO_EVSIZE] > BHI_CHUNK)
         {
-          snerr("ERROR: The firmware has no sensor %u: %d\n", sensor->id,
-                ret);
-          return -ENODEV;
+          snerr("ERROR: Sensor %u's information: %d\n", id, ret);
+          return ret < 0 ? ret : -EIO;
         }
 
       sensor->evsize = info[BHI_SENSOR_INFO_EVSIZE];
@@ -823,9 +977,12 @@ static int bhi260ap_boot(FAR struct bhi260ap_dev_s *dev)
 
   for (i = 0; i < BHI_NSENSORS; i++)
     {
-      if (dev->sensor[i].enabled)
+      FAR struct bhi260ap_sensor_s *sensor = &dev->sensor[i];
+
+      if (sensor->enabled && sensor->evsize > 0)
         {
-          bhi260ap_configure(dev, dev->sensor[i].id, dev->sensor[i].rate);
+          bhi260ap_configure(dev, sensor->kind->id, sensor->rate,
+                             sensor->latency);
         }
     }
 
@@ -852,9 +1009,17 @@ static int bhi260ap_activate(FAR struct sensor_lowerhalf_s *lower,
       ret = bhi260ap_boot(dev);
     }
 
-  if (ret >= 0 && dev->booted)
+  if (ret >= 0 && dev->booted && sensor->evsize == 0)
     {
-      ret = bhi260ap_configure(dev, sensor->id, enable ? sensor->rate : 0);
+      /* Not in this firmware image */
+
+      sensor->enabled = false;
+      ret = enable ? -ENODEV : OK;
+    }
+  else if (ret >= 0 && dev->booted)
+    {
+      ret = bhi260ap_configure(dev, sensor->kind->id,
+                               enable ? sensor->rate : 0, sensor->latency);
       if (ret >= 0)
         {
           sensor->enabled = enable;
@@ -892,11 +1057,93 @@ static int bhi260ap_set_interval(FAR struct sensor_lowerhalf_s *lower,
   sensor->rate = 1000000.0f / *period_us;
   if (sensor->enabled && dev->booted)
     {
-      ret = bhi260ap_configure(dev, sensor->id, sensor->rate);
+      ret = bhi260ap_configure(dev, sensor->kind->id, sensor->rate,
+                               sensor->latency);
     }
 
   nxmutex_unlock(&dev->lock);
   return ret;
+}
+
+/****************************************************************************
+ * Name: bhi260ap_batch
+ *
+ * Description:
+ *   How long the chip may hold the sensor's events in its FIFO before it
+ *   interrupts the host: the host sleeps meanwhile.  Kept in ms, the
+ *   command's unit, up to its 24 bits.
+ *
+ ****************************************************************************/
+
+static int bhi260ap_batch(FAR struct sensor_lowerhalf_s *lower,
+                          FAR struct file *filep,
+                          FAR uint32_t *latency_us)
+{
+  FAR struct bhi260ap_sensor_s *sensor =
+    (FAR struct bhi260ap_sensor_s *)lower;
+  FAR struct bhi260ap_dev_s *dev = sensor->dev;
+  uint32_t latency = *latency_us / 1000;
+  int ret = OK;
+
+  /* The command's field: the ioctl's microseconds never reach it */
+
+  if (latency > BHI_LATENCY_MAX)
+    {
+      latency = BHI_LATENCY_MAX;
+    }
+
+  nxmutex_lock(&dev->lock);
+
+  sensor->latency = latency;
+  *latency_us     = latency * 1000;
+  if (sensor->enabled && dev->booted)
+    {
+      ret = bhi260ap_configure(dev, sensor->kind->id, sensor->rate,
+                               sensor->latency);
+    }
+
+  nxmutex_unlock(&dev->lock);
+  return ret;
+}
+
+/****************************************************************************
+ * Name: bhi260ap_sensor_register, bhi260ap_sensor_unregister
+ *
+ * Description:
+ *   Register a sensor's topic: its uORB type's, or its own.
+ *
+ ****************************************************************************/
+
+static int bhi260ap_sensor_register(FAR struct bhi260ap_sensor_s *sensor,
+                                    int devno)
+{
+  char path[32];
+
+  if (sensor->kind->type != SENSOR_TYPE_CUSTOM)
+    {
+      return sensor_register(&sensor->lower, devno);
+    }
+
+  snprintf(path, sizeof(path), "/dev/uorb/sensor_%s%d", sensor->kind->name,
+           devno);
+  return sensor_custom_register(&sensor->lower, path,
+                                sizeof(struct sensor_event));
+}
+
+static void bhi260ap_sensor_unregister(FAR struct bhi260ap_sensor_s *sensor,
+                                       int devno)
+{
+  char path[32];
+
+  if (sensor->kind->type != SENSOR_TYPE_CUSTOM)
+    {
+      sensor_unregister(&sensor->lower, devno);
+      return;
+    }
+
+  snprintf(path, sizeof(path), "/dev/uorb/sensor_%s%d", sensor->kind->name,
+           devno);
+  sensor_custom_unregister(&sensor->lower, path);
 }
 
 /****************************************************************************
@@ -944,17 +1191,17 @@ int bhi260ap_register(int devno, FAR struct i2c_master_s *i2c, uint8_t addr,
       goto errout;
     }
 
-  dev->sensor[BHI_ACC].id               = BHI_ID_ACC;
-  dev->sensor[BHI_ACC].lower.type       = SENSOR_TYPE_ACCELEROMETER;
-  dev->sensor[BHI_GYRO].id              = BHI_ID_GYRO;
-  dev->sensor[BHI_GYRO].lower.type      = SENSOR_TYPE_GYROSCOPE;
-
   for (i = 0; i < BHI_NSENSORS; i++)
     {
-      dev->sensor[i].dev           = dev;
-      dev->sensor[i].rate          = BHI_DEFAULT_RATE;
-      dev->sensor[i].lower.ops     = &g_bhi260ap_ops;
-      dev->sensor[i].lower.nbuffer = 16;
+      FAR struct bhi260ap_sensor_s *sensor = &dev->sensor[i];
+      bool axes = g_bhi_kinds[i].data == BHI_DATA_AXES;
+
+      sensor->dev           = dev;
+      sensor->kind          = &g_bhi_kinds[i];
+      sensor->rate          = axes ? BHI_DEFAULT_RATE : BHI_EVENT_RATE;
+      sensor->lower.type    = g_bhi_kinds[i].type;
+      sensor->lower.ops     = &g_bhi260ap_ops;
+      sensor->lower.nbuffer = axes ? 16 : 4;
     }
 
   ret = config->attach(config, bhi260ap_interrupt, dev);
@@ -965,13 +1212,13 @@ int bhi260ap_register(int devno, FAR struct i2c_master_s *i2c, uint8_t addr,
 
   for (i = 0; i < BHI_NSENSORS; i++)
     {
-      ret = sensor_register(&dev->sensor[i].lower, devno);
+      ret = bhi260ap_sensor_register(&dev->sensor[i], devno);
       if (ret < 0)
         {
           snerr("ERROR: sensor_register failed: %d\n", ret);
           while (--i >= 0)
             {
-              sensor_unregister(&dev->sensor[i].lower, devno);
+              bhi260ap_sensor_unregister(&dev->sensor[i], devno);
             }
 
           goto errout;

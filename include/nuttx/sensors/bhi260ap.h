@@ -45,6 +45,26 @@
 
 #define BHI260AP_I2C_ADDRESS 0x28
 
+/* The names of the topics of the firmware's sensors that uORB has no type
+ * for: /dev/uorb/sensor_<name><devno>, of struct sensor_event
+ */
+
+#define BHI260AP_STATIONARY  "stationary"   /* Still for a while: event 1 */
+#define BHI260AP_ACTIVITY    "activity"     /* Activities started and
+                                             * ended: event the bits below */
+
+/* Activities, and their bits in an activity event */
+
+#define BHI260AP_ACTIVITY_STILL       0
+#define BHI260AP_ACTIVITY_WALKING     1
+#define BHI260AP_ACTIVITY_RUNNING     2
+#define BHI260AP_ACTIVITY_BICYCLE     3
+#define BHI260AP_ACTIVITY_VEHICLE     4
+#define BHI260AP_ACTIVITY_TILTING     5
+
+#define BHI260AP_ACTIVITY_ENDED(a)    (1 << (a))
+#define BHI260AP_ACTIVITY_STARTED(a)  (1 << ((a) + 8))
+
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -98,9 +118,26 @@ struct i2c_master_s;
  * Name: bhi260ap_register
  *
  * Description:
- *   Register a Bosch BHI260AP smart sensor hub as the uORB topics
- *   sensor_accel<devno> and sensor_gyro<devno>, reporting its accelerometer
- *   in m/s^2 and its gyroscope in rad/s.
+ *   Register a Bosch BHI260AP smart sensor hub as uORB topics, <devno>
+ *   after each name:
+ *
+ *     sensor_accel, sensor_gyro   its accelerometer in m/s^2 and its
+ *                                 gyroscope in rad/s
+ *     sensor_tilt_detector        its angle changed: event 1
+ *     sensor_step_counter         steps since the firmware started
+ *     sensor_glance_gesture       lifted to be looked at   } event 1
+ *     sensor_pickup_gesture       picked up                }
+ *     sensor_significant_motion   moving: the hub's motion detector (id
+ *                                 77, not its significant motion, 55),
+ *                                 uORB's SENSOR_TYPE_MOTION_DETECT,
+ *                                 which NuttX's table names so
+ *     sensor_stationary           still (BHI260AP_STATIONARY)
+ *     sensor_activity             activities (BHI260AP_ACTIVITY)
+ *
+ *   All but the first two are worked out by the firmware, and only some
+ *   images have them: one the image lacks fails to activate (open) with
+ *   -ENODEV.  The chip holds events for as long as a topic's batch latency
+ *   allows (SNIOC_BATCH), up to the ioctl's 2^32 us (about 71 minutes).
  *
  * Input Parameters:
  *   devno  - The instance number of the topics

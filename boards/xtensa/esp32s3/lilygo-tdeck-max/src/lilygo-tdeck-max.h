@@ -218,9 +218,9 @@ int tdeck_haptic_initialize(void);
  * Name: tdeck_imu_initialize
  *
  * Description:
- *   Register the BHI260AP as the uORB topics sensor_accel0 and
- *   sensor_gyro0.  The XL9555 powers it, so this runs after the XL9555 is
- *   set up.
+ *   Register the BHI260AP as uORB topics: sensor_accel0, sensor_gyro0 and
+ *   its firmware's sensors (bhi260ap_register()).  The XL9555 powers it,
+ *   so this runs after the XL9555 is set up.
  *
  * Returned Value:
  *   Zero (OK) on success; a negated errno value on failure.

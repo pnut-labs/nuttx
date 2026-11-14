@@ -61,8 +61,8 @@ The port is being written part by part.  Supported so far:
   ``nxplayer`` and ``nxrecorder`` (``full``);
 * the vibration motor as ``/dev/input_ff0``, and the ``haptic`` command
   (``full``);
-* the IMU's accelerometer and gyroscope as uORB topics, with the
-  ``sensortest`` command (``full``);
+* the IMU's accelerometer and gyroscope, and its firmware's virtual
+  sensors, as uORB topics, with the ``sensortest`` command (``full``);
 * 2.4 GHz Wi-Fi and Bluetooth LE, off until asked for, with the ``wapi``,
   ``ping`` and ``bt`` commands (``full``);
 * power management: light sleep until the next timer, wake-up pins, and
@@ -550,7 +550,22 @@ XL9555's ``imu_en`` line, is registered with the ``bhi260ap`` driver
   deletes the image.
 * The accelerometer (m/s², 8 g range) and the gyroscope (rad/s, 2000
   degrees/s) are the firmware's passthrough sensors, at 50 Hz by default.
-  Their host interrupt on GPIO21 is level triggered.
+  Their host interrupt on GPIO21 is level triggered, and wakes the chip
+  from light sleep.
+* The firmware's virtual sensors, worked out on the hub, are topics too:
+  ``sensor_step_counter0``, ``sensor_tilt_detector0``,
+  ``sensor_glance_gesture0``, ``sensor_pickup_gesture0``,
+  ``sensor_significant_motion0`` (the hub's motion detector, id 77, not
+  its significant motion; uORB's ``SENSOR_TYPE_MOTION_DETECT``, which
+  NuttX's table names so), and two that uORB has no type for, registered by
+  name with ``struct sensor_event``: ``sensor_stationary0`` and
+  ``sensor_activity0`` (the bits of the activities started and ended,
+  ``BHI260AP_ACTIVITY_*``).  The image has them all; one an image lacked
+  would fail to open with ``ENODEV``.  ``SNIOC_BATCH`` lets the hub hold
+  a topic's events for up to the ioctl's 2^32 µs (about 71 minutes), the
+  host asleep meanwhile.
+* Lying still on a desk, the accelerometer reads about (-0.3, 0.9, -9.2)
+  m/s².
 
 Vibration motor
 ===============
@@ -838,8 +853,8 @@ GNSS receiver (``/dev/ttyGNSS0`` and its uORB topics, the ``gps``
 command), the modem (``/dev/ttyS1``, the ``modem`` command), the audio
 codec (``/dev/audio/pcm0``, ``/dev/audio/pcm_in0``, ``nxplayer``,
 ``nxrecorder``), the vibration motor (``/dev/input_ff0``, the ``haptic``
-command), the IMU (the uORB topics ``sensor_accel0`` and ``sensor_gyro0``,
-the ``sensortest`` command), Wi-Fi and Bluetooth LE (``/dev/wifi_en``,
+command), the IMU (its uORB topics, ``sensor_accel0``, ``sensor_gyro0`` and its
+firmware's virtual sensors, the ``sensortest`` command), Wi-Fi and Bluetooth LE (``/dev/wifi_en``,
 ``/dev/ble_en``, the ``wapi``, ``ping`` and ``bt`` commands), power
 management (light sleep, frequency scaling, ``/proc/pm``, ``/dev/awake``,
 ``pmconfig``), the RTC (``/dev/rtc0``, the ``date`` command), and
