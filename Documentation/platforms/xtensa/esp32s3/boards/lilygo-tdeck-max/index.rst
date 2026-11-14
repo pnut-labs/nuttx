@@ -371,6 +371,15 @@ preamble given on the command line::
   124 ms on air at SF9 and 125 kHz.  In earlier firmware, the same driver
   exchanged packets both ways with a MeshCore node (a T-Watch S3 at
   869.618 MHz, 62.5 kHz, SF8).
+* The driver can listen in the background (``SX126XIOC_LISTENSET``): all
+  the time, or on the chip's own duty cycle of listening and sleeping.  It
+  keeps the packets heard, up to ``LPWAN_SX126X_RXQUEUE``, for ``read()``
+  and ``poll()``, and a ``write()`` sends between them, then listens again.
+  On the board (2026-11-13/14) it listened continuously and on a duty
+  cycle (nothing was heard: no sender nearby), sent 12 bytes at
+  869.525 MHz, 125 kHz, SF9, a 16-symbol preamble and 2 dBm (177 ms on
+  air by Semtech's formula; opening, sending and closing took 242 ms),
+  and listened again after the send.
 
 GNSS
 ====
@@ -394,8 +403,22 @@ clock from the fix.
 * Writing to ``/dev/ttyGNSS0`` sends commands (NMEA or UBX) to the
   receiver.
 * The build downloads the minmea library, which needs ``unzip``.
-* Indoors, from a cold start, it reports satellites in view; a position
-  fix has not been tried with a view of the sky yet.
+* The MIA-M10Q keeps nothing while ``gps_en`` is off: each start is at its
+  default date (2021-03-07) with no time, position or orbit data, so every
+  start is cold unless the receiver is given them (UBX ``MGA-INI-TIME_UTC``,
+  ``MGA-INI-POS_LLH`` and the ``MGA-DBD`` data it dumped before).  Its dump
+  ends with an ``MGA-ACK`` only once ``CFG-NAVSPG-ACKAIDING`` is on, and the
+  receiver acknowledges each entry given back with the same message.
+* A configuration sent the moment the rail comes on is lost: wait for the
+  receiver's first output.  A new reader of ``/dev/ttyGNSS0`` can first
+  get output left from the previous session (seen on the board; which
+  layer keeps it is not known: the upper half starts a reader at its
+  write position).
+* Indoors, from a cold start, it reports satellites in view.  By a window
+  (2026-11-14), given the time, no fix came in 10 minutes from cold nor in
+  15 more with its orbit data given back (no satellite used), though it
+  gathered orbit data (dumps of 17, then 42 entries).  A fix under open sky
+  has not been tried yet.
 
 Modem
 =====
@@ -564,8 +587,10 @@ XL9555's ``imu_en`` line, is registered with the ``bhi260ap`` driver
   would fail to open with ``ENODEV``.  ``SNIOC_BATCH`` lets the hub hold
   a topic's events for up to the ioctl's 2^32 µs (about 71 minutes), the
   host asleep meanwhile.
-* Lying still on a desk, the accelerometer reads about (-0.3, 0.9, -9.2)
-  m/s².
+* Lying still on a desk, screen up, the accelerometer reads about (-0.3,
+  0.9, -9.2) m/s²: the chip's z axis points out of the back of the board,
+  whereas Android's convention reads +1 g screen up.  The driver does not
+  remap the axes.
 
 Vibration motor
 ===============
