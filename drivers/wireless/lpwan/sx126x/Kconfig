@@ -24,5 +24,20 @@ config LPWAN_SX126X_CR_DEFAULT
 config LPWAN_SX126X_MAX_DEVICES
 	int "SX126X maximum devices"
 	default 1
+	range 1 4
+
+config LPWAN_SX126X_RXQUEUE
+	int "SX126X packets kept while listening"
+	default 4
+	range 1 16
+	---help---
+		While the chip listens in the background (SX126XIOC_LISTENSET),
+		the packets heard and not read yet, each about 270 bytes; the
+		oldest is dropped for a new one.
+
+config LPWAN_SX126X_NPOLLWAITERS
+	int "SX126X poll waiters"
+	default 2
+	range 1 8
 
 endif # LPWAN_SX126X
