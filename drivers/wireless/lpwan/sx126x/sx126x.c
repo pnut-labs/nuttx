@@ -476,6 +476,15 @@ static ssize_t sx126x_read(FAR struct file *filep,
       return sx126x_read_queued(dev, filep, header);
     }
 
+  /* Not listening, a read waits for one packet, which a reader that may
+   * not wait cannot: listening stopped, or never began
+   */
+
+  if (filep->f_oflags & O_NONBLOCK)
+    {
+      return -ECANCELED;
+    }
+
   ret = nxmutex_lock(&dev->lock);
   if (ret < 0)
     {
@@ -780,9 +789,7 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
           FAR struct sx126x_listen_s *ptr =
             (FAR struct sx126x_listen_s *)((uintptr_t)arg);
 
-          DEBUGASSERT(ptr != NULL);
-
-          if (ptr->mode > SX126X_LISTEN_DUTY_CYCLE ||
+          if (ptr == NULL || ptr->mode > SX126X_LISTEN_DUTY_CYCLE ||
               (ptr->mode == SX126X_LISTEN_DUTY_CYCLE &&
                (SX126X_DUTY_STEPS(ptr->rx_us) == 0 ||
                 SX126X_DUTY_STEPS(ptr->rx_us) > SX126X_DUTY_STEPS_MAX ||
@@ -1981,6 +1988,7 @@ static void sx126x_listen_drain(FAR struct sx126x_dev_s *dev)
 static void sx126x_listen_flush(FAR struct sx126x_dev_s *dev)
 {
   irqstate_t flags;
+  int value;
 
   flags = spin_lock_irqsave(&dev->qspin);
   dev->qhead  = 0;
@@ -1988,7 +1996,12 @@ static void sx126x_listen_flush(FAR struct sx126x_dev_s *dev)
   poll_notify(dev->fds, CONFIG_LPWAN_SX126X_NPOLLWAITERS, POLLIN);
   spin_unlock_irqrestore(&dev->qspin, flags);
 
-  nxsem_post(&dev->rx_sem);
+  /* One post wakes a waiting reader; more would only pile up */
+
+  if (nxsem_get_value(&dev->rx_sem, &value) >= 0 && value <= 0)
+    {
+      nxsem_post(&dev->rx_sem);
+    }
 }
 
 /****************************************************************************
