@@ -341,12 +341,12 @@ static int ff_close(FAR struct file *filep)
 
   for (i = 0; i < upper->max_effects; i++)
     {
-      if (upper->effects[i].owner == filep)
+      if (upper->effects[i].owner == filep &&
+          ff_erase_effect(upper, i, filep) < 0)
         {
-          ff_erase_effect(upper, i, filep);
-
-          /* Not the file's any more, even if the device would not erase
-           * it: no later file may take it over
+          /* The device kept it, and ff_erase_effect() gave it back to the
+           * file: not the closed file's any more, else a later file at
+           * the same address would own it
            */
 
           upper->effects[i].owner = NULL;
