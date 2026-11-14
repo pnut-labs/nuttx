@@ -186,6 +186,7 @@ FAR struct posix_timer_s *timer_gethandle(timer_t timerid)
   FAR struct posix_timer_s *timer = NULL;
   FAR sq_entry_t *entry;
   irqstate_t flags;
+  pid_t pid = 0;
 
   if (timerid != NULL)
     {
@@ -195,7 +196,12 @@ FAR struct posix_timer_s *timer_gethandle(timer_t timerid)
         {
           if (entry == timerid)
             {
+              /* Its owner read under the lock: once it is released,
+               * another thread may delete the timer
+               */
+
               timer = (FAR struct posix_timer_s *)timerid;
+              pid   = timer->pt_owner;
               break;
             }
         }
@@ -205,7 +211,7 @@ FAR struct posix_timer_s *timer_gethandle(timer_t timerid)
 
   if (timer != NULL && !up_interrupt_context())
     {
-      FAR struct tcb_s *owner = nxsched_get_tcb(timer->pt_owner);
+      FAR struct tcb_s *owner = nxsched_get_tcb(pid);
 
       if (owner == NULL || owner->group != this_task()->group)
         {
