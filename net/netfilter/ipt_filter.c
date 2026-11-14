@@ -47,6 +47,11 @@
                             (1 << NF_INET_FORWARD)  | \
                             (1 << NF_INET_LOCAL_OUT))
 
+/* The hooks a filter table has, LOCAL_IN to LOCAL_OUT, from 0 */
+
+#define FILTER_NHOOKS      (NF_INET_LOCAL_OUT - NF_INET_LOCAL_IN + 1)
+#define FILTER_HOOK(hook)  ((hook) - NF_INET_LOCAL_IN)
+
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
@@ -72,6 +77,47 @@ static enum ipfilter_chain_e convert_chain(enum nf_inet_hooks hook)
       case NF_INET_LOCAL_OUT:
       default:
         return IPFILTER_CHAIN_OUTPUT;
+    }
+}
+
+/****************************************************************************
+ * Name: free_chains
+ *
+ * Description:
+ *   Free the entries converted for the hooks from LOCAL_IN to last, a
+ *   configuration given up.
+ *
+ ****************************************************************************/
+
+static void free_chains(FAR sq_queue_t *chains, enum nf_inet_hooks last)
+{
+  enum nf_inet_hooks hook;
+
+  for (hook = NF_INET_LOCAL_IN; hook <= last; hook++)
+    {
+      while (!sq_empty(&chains[FILTER_HOOK(hook)]))
+        {
+          kmm_free(sq_remfirst(&chains[FILTER_HOOK(hook)]));
+        }
+    }
+}
+
+/****************************************************************************
+ * Name: replace_chain
+ *
+ * Description:
+ *   Replace a chain's configuration with the entries converted for it.
+ *
+ ****************************************************************************/
+
+static void replace_chain(FAR sq_queue_t *entries, sa_family_t family,
+                          enum ipfilter_chain_e chain)
+{
+  ipfilter_cfg_clear(family, chain);
+  while (!sq_empty(entries))
+    {
+      ipfilter_cfg_add((FAR struct ipfilter_entry_s *)sq_remfirst(entries),
+                       family, chain);
     }
 }
 
@@ -364,22 +410,21 @@ skip_match:
  ****************************************************************************/
 
 #ifdef CONFIG_NET_IPv4
-static void adjust_ipv4filter(FAR const struct ipt_replace *repl)
+static int adjust_ipv4filter(FAR const struct ipt_replace *repl)
 {
+  sq_queue_t chains[FILTER_NHOOKS];
   FAR const struct ipt_entry *entry;
   FAR const uint8_t *head;
-  enum ipfilter_chain_e chain;
   enum nf_inet_hooks hook;
   size_t size;
 
+  /* Convert every entry first: a chain is replaced only once all of them
+   * are, else the old configuration stays whole.
+   */
+
   for (hook = NF_INET_LOCAL_IN; hook <= NF_INET_LOCAL_OUT; hook++)
     {
-      /* Clear all filter config first. */
-
-      chain = convert_chain(hook);
-      ipfilter_cfg_clear(PF_INET, chain);
-
-      /* Set filter config according to iptables config. */
+      sq_init(&chains[FILTER_HOOK(hook)]);
 
       head = (FAR const uint8_t *)repl->entries + repl->hook_entry[hook];
       size = repl->underflow[hook] - repl->hook_entry[hook];
@@ -391,36 +436,47 @@ static void adjust_ipv4filter(FAR const struct ipt_replace *repl)
       ipt_entry_for_every(entry, head, size)
         {
           FAR struct ipv4_filter_entry_s *filter = convert_ipv4entry(entry);
-          if (filter != NULL)
-            {
-              ipfilter_cfg_add(&filter->common, PF_INET, chain);
-            }
-          else
+
+          if (filter == NULL)
             {
               nwarn("WARNING: Failed to convert entry!\n");
+              free_chains(chains, hook);
+              return -ENOMEM;
             }
+
+          sq_addlast((FAR sq_entry_t *)&filter->common,
+                     &chains[FILTER_HOOK(hook)]);
         }
     }
+
+  /* Then replace each chain's configuration with its new one. */
+
+  for (hook = NF_INET_LOCAL_IN; hook <= NF_INET_LOCAL_OUT; hook++)
+    {
+      replace_chain(&chains[FILTER_HOOK(hook)], PF_INET,
+                    convert_chain(hook));
+    }
+
+  return OK;
 }
 #endif
 
 #ifdef CONFIG_NET_IPv6
-static void adjust_ipv6filter(FAR const struct ip6t_replace *repl)
+static int adjust_ipv6filter(FAR const struct ip6t_replace *repl)
 {
+  sq_queue_t chains[FILTER_NHOOKS];
   FAR const struct ip6t_entry *entry;
   FAR const uint8_t *head;
-  enum ipfilter_chain_e chain;
   enum nf_inet_hooks hook;
   size_t size;
 
+  /* Convert every entry first: a chain is replaced only once all of them
+   * are, else the old configuration stays whole.
+   */
+
   for (hook = NF_INET_LOCAL_IN; hook <= NF_INET_LOCAL_OUT; hook++)
     {
-      /* Clear all filter config first. */
-
-      chain = convert_chain(hook);
-      ipfilter_cfg_clear(PF_INET6, chain);
-
-      /* Set filter config according to iptables config. */
+      sq_init(&chains[FILTER_HOOK(hook)]);
 
       head = (FAR const uint8_t *)repl->entries + repl->hook_entry[hook];
       size = repl->underflow[hook] - repl->hook_entry[hook];
@@ -432,16 +488,30 @@ static void adjust_ipv6filter(FAR const struct ip6t_replace *repl)
       ip6t_entry_for_every(entry, head, size)
         {
           FAR struct ipv6_filter_entry_s *filter = convert_ipv6entry(entry);
+
           if (filter != NULL)
             {
-              ipfilter_cfg_add(&filter->common, PF_INET6, chain);
+              sq_addlast((FAR sq_entry_t *)&filter->common,
+                         &chains[FILTER_HOOK(hook)]);
             }
           else
             {
               nwarn("WARNING: Failed to convert entry!\n");
+              free_chains(chains, hook);
+              return -ENOMEM;
             }
         }
     }
+
+  /* Then replace each chain's configuration with its new one. */
+
+  for (hook = NF_INET_LOCAL_IN; hook <= NF_INET_LOCAL_OUT; hook++)
+    {
+      replace_chain(&chains[FILTER_HOOK(hook)], PF_INET6,
+                    convert_chain(hook));
+    }
+
+  return OK;
 }
 #endif
 
@@ -535,9 +605,7 @@ int ipt_filter_apply(FAR const struct ipt_replace *repl)
 
   /* Set config table into ip filter. */
 
-  adjust_ipv4filter(repl);
-
-  return OK;
+  return adjust_ipv4filter(repl);
 }
 #endif
 
@@ -594,8 +662,6 @@ int ip6t_filter_apply(FAR const struct ip6t_replace *repl)
 
   /* Set config table into ip filter. */
 
-  adjust_ipv6filter(repl);
-
-  return OK;
+  return adjust_ipv6filter(repl);
 }
 #endif
