@@ -335,9 +335,23 @@ static int ff_close(FAR struct file *filep)
 {
   FAR struct inode *inode = filep->f_inode;
   FAR struct ff_upperhalf_s *upper = inode->i_private;
+  int ret;
   int i;
 
-  nxmutex_lock(&upper->lock);
+  /* A close does not fail (an error would keep the inode): a signal does
+   * not stop the wait for the lock, and a cancellation leaves the effects
+   */
+
+  do
+    {
+      ret = nxmutex_lock(&upper->lock);
+    }
+  while (ret == -EINTR);
+
+  if (ret < 0)
+    {
+      return OK;
+    }
 
   for (i = 0; i < upper->max_effects; i++)
     {
