@@ -48,8 +48,9 @@
                             (1 << NF_INET_FORWARD)  | \
                             (1 << NF_INET_LOCAL_OUT))
 
-/* The hooks a filter table has, LOCAL_IN to LOCAL_OUT: FILTER_HOOK() gives
- * each an index into an array of FILTER_NHOOKS, the first 0
+/* A filter table has the hooks from LOCAL_IN to LOCAL_OUT, FILTER_NHOOKS
+ * of them.  FILTER_HOOK() gives a hook's index into an array of that
+ * many: 0 for LOCAL_IN, FILTER_NHOOKS - 1 for LOCAL_OUT.
  */
 
 #define FILTER_NHOOKS      (NF_INET_LOCAL_OUT - NF_INET_LOCAL_IN + 1)
