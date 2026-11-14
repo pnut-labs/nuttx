@@ -379,6 +379,24 @@ struct v9fs_fid_s
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: v9fs_qid_ino
+ *
+ * Description:
+ *   Return the file serial number (st_ino, d_ino) for a qid path.  The
+ *   qid path identifies the file on the server; it is folded into ino_t
+ *   and never 0, because programs such as GNU make skip directory entries
+ *   with d_ino 0.
+ *
+ ****************************************************************************/
+
+static inline ino_t v9fs_qid_ino(uint64_t path)
+{
+  ino_t ino = (ino_t)(path ^ (path >> 32));
+
+  return ino != 0 ? ino : 1;
+}
+
+/****************************************************************************
  * v9fs_get_tagid
  ****************************************************************************/
 
@@ -564,7 +582,13 @@ static int v9fs_client_rpc(FAR struct v9fs_transport_s *transport,
       return ret;
     }
 
-  nxsem_wait(&payload.resp);
+  /* The transport writes the reply into payload and into the buffers of
+   * the caller, all on the stack: wait for it even if a signal wakes this
+   * thread.
+   */
+
+  nxsem_wait_uninterruptible(&payload.resp);
+
   nxsem_destroy(&payload.resp);
 
   return payload.ret;
@@ -814,6 +838,7 @@ int v9fs_client_stat(FAR struct v9fs_client_s *client, uint32_t fid,
       return ret;
     }
 
+  buf->st_ino   = v9fs_qid_ino(response.qid.path);
   buf->st_mode  = response.mode;
   buf->st_uid   = response.uid;
   buf->st_gid   = response.gid;
@@ -873,7 +898,7 @@ int v9fs_client_chstat(FAR struct v9fs_client_s *client, uint32_t fid,
 
   request.fid = fid;
   request.valid = v9fs_map_setattr_flags(flags);
-  request.mode = v9fs_map_open_flags(buf->st_mode);
+  request.mode = buf->st_mode & 07777;
   request.uid = buf->st_uid;
   request.gid = buf->st_gid;
   request.size = buf->st_size;
@@ -1016,6 +1041,7 @@ ssize_t v9fs_client_convertdir(FAR const uint8_t *buffer, size_t bufsize,
                                off_t head, FAR off_t *offset,
                                FAR struct dirent *entry)
 {
+  uint64_t qidpath;
   uint64_t off;
   uint16_t name_len;
   off_t next = head;
@@ -1024,13 +1050,19 @@ ssize_t v9fs_client_convertdir(FAR const uint8_t *buffer, size_t bufsize,
    * (qid, offset, type, name_len)
    */
 
-  if (bufsize < V9FS_QIDSZ + V9FS_BIT64SZ + V9FS_BIT8SZ + V9FS_BIT16SZ)
+  if (bufsize - head < V9FS_QIDSZ + V9FS_BIT64SZ + V9FS_BIT8SZ +
+                       V9FS_BIT16SZ)
     {
       return -EIO;
     }
 
-  /* Skip the qid part (13 Bytes) */
+  /* The qid part (13 Bytes): type, version, then the path that identifies
+   * the file.
+   */
 
+  memcpy(&qidpath, buffer + next + V9FS_BIT8SZ + V9FS_BIT32SZ,
+         sizeof(uint64_t));
+  entry->d_ino = v9fs_qid_ino(qidpath);
   next += V9FS_QIDSZ;
 
   /* Read the offset (8 bytes) */
@@ -1638,6 +1670,7 @@ int v9fs_client_init(FAR struct v9fs_client_s *client,
   while (*options != '\0')
     {
       FAR const char *sep = strchr(options, ',');
+
       length = sep ? sep - options : strlen(options);
 
       if (strncmp(options, "uname=", 6) == 0)
@@ -1657,7 +1690,13 @@ int v9fs_client_init(FAR struct v9fs_client_s *client,
           client->msize = atoi(options + 6);
         }
 
-      options += length + 1;
+      /* The last option has no comma after it */
+
+      options += length;
+      if (*options == ',')
+        {
+          options++;
+        }
     }
 
   if (client->msize == 0)
@@ -1819,5 +1858,6 @@ int v9fs_fid_get(FAR struct v9fs_client_s *client, uint32_t fid)
 ssize_t v9fs_parse_size(FAR const void *buffer)
 {
   FAR const struct v9fs_header_s *ptr = buffer;
+
   return ptr->size;
 }
