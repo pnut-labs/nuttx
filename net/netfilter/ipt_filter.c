@@ -34,6 +34,7 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/net/netfilter/ip_tables.h>
 #include <nuttx/net/netfilter/x_tables.h>
+#include <nuttx/queue.h>
 
 #include "ipfilter/ipfilter.h"
 #include "netdev/netdev.h"
@@ -47,7 +48,9 @@
                             (1 << NF_INET_FORWARD)  | \
                             (1 << NF_INET_LOCAL_OUT))
 
-/* The hooks a filter table has, LOCAL_IN to LOCAL_OUT, from 0 */
+/* The hooks a filter table has, LOCAL_IN to LOCAL_OUT: FILTER_HOOK() gives
+ * each an index into an array of FILTER_NHOOKS, the first 0
+ */
 
 #define FILTER_NHOOKS      (NF_INET_LOCAL_OUT - NF_INET_LOCAL_IN + 1)
 #define FILTER_HOOK(hook)  ((hook) - NF_INET_LOCAL_IN)
