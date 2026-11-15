@@ -214,6 +214,14 @@ static int touch_close(FAR struct file *filep)
 
 /****************************************************************************
  * Name: touch_write
+ *
+ * Description:
+ *   A lower half's own write wins.  Without one, and with
+ *   CONFIG_INPUT_INJECT, whole struct touch_sample_s records of one point
+ *   each are taken as samples of the device, in its own coordinates, and
+ *   given to every reader, as the driver's are: touches injected in place
+ *   of a finger, for tests.
+ *
  ****************************************************************************/
 
 static ssize_t touch_write(FAR struct file *filep, FAR const char *buffer,
@@ -222,13 +230,46 @@ static ssize_t touch_write(FAR struct file *filep, FAR const char *buffer,
   FAR struct inode *inode             = filep->f_inode;
   FAR struct touch_upperhalf_s *upper = inode->i_private;
   FAR struct touch_lowerhalf_s *lower = upper->lower;
+  struct touch_sample_s sample;
+  size_t i;
 
-  if (!lower->write)
+  if (lower->write)
     {
-      return -ENOSYS;
+      return lower->write(lower, buffer, buflen);
     }
 
-  return lower->write(lower, buffer, buflen);
+#ifndef CONFIG_INPUT_INJECT
+  UNUSED(sample);
+  UNUSED(i);
+  return -ENOSYS;
+#else
+  if (buflen == 0 || buflen % sizeof(sample) != 0)
+    {
+      return -EINVAL;
+    }
+
+  for (i = 0; i < buflen; i += sizeof(sample))
+    {
+      memcpy(&sample, buffer + i, sizeof(sample));
+      if (sample.npoints != 1)
+        {
+          return -EINVAL;
+        }
+    }
+
+  /* The buffer is the caller's: a sample holds one point, whatever it
+   * says now
+   */
+
+  for (i = 0; i < buflen; i += sizeof(sample))
+    {
+      memcpy(&sample, buffer + i, sizeof(sample));
+      sample.npoints = 1;
+      touch_event(upper, &sample);
+    }
+
+  return buflen;
+#endif
 }
 
 /****************************************************************************

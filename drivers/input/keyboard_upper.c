@@ -28,8 +28,10 @@
 
 #include <assert.h>
 #include <nuttx/debug.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <string.h>
 
 #include <nuttx/input/keyboard.h>
 #include <nuttx/input/kbd_codec.h>
@@ -306,6 +308,13 @@ errout:
 
 /****************************************************************************
  * Name: keyboard_write
+ *
+ * Description:
+ *   A lower half's own write wins.  Without one, and with
+ *   CONFIG_INPUT_INJECT, whole struct keyboard_event_s records are taken
+ *   as events of the device and given to every reader, as the driver's
+ *   are: input injected in place of the keys, for tests.
+ *
  ****************************************************************************/
 
 static ssize_t keyboard_write(FAR struct file *filep,
@@ -314,13 +323,46 @@ static ssize_t keyboard_write(FAR struct file *filep,
   FAR struct inode                *inode = filep->f_inode;
   FAR struct keyboard_upperhalf_s *upper = inode->i_private;
   FAR struct keyboard_lowerhalf_s *lower = upper->lower;
+  struct keyboard_event_s          event;
+  size_t                           i;
 
   if (lower->write != NULL)
     {
       return lower->write(lower, buffer, buflen);
     }
 
+#ifndef CONFIG_INPUT_INJECT
+  UNUSED(event);
+  UNUSED(i);
   return -ENOSYS;
+#else
+  if (buflen == 0 || buflen % sizeof(event) != 0)
+    {
+      return -EINVAL;
+    }
+
+  for (i = 0; i < buflen; i += sizeof(event))
+    {
+      memcpy(&event, buffer + i, sizeof(event));
+      if (event.type > KEYBOARD_SPECREL)
+        {
+          return -EINVAL;
+        }
+    }
+
+  /* The buffer is the caller's: read again, checked again */
+
+  for (i = 0; i < buflen; i += sizeof(event))
+    {
+      memcpy(&event, buffer + i, sizeof(event));
+      if (event.type <= KEYBOARD_SPECREL)
+        {
+          keyboard_event(lower, event.code, event.type);
+        }
+    }
+
+  return buflen;
+#endif
 }
 
 /****************************************************************************
