@@ -212,9 +212,10 @@ struct touch_point_s
   uint64_t timestamp; /* Touch event time stamp, in microseconds */
 };
 
-/* The typical touchscreen driver is a read-only, input character device
- * driver.the driver write() method is not supported and any attempt to
- * open the driver in any mode other than read-only will fail.
+/* The typical touchscreen driver is an input character device driver
+ * read for touch samples.  A write() goes to the lower half's write method
+ * if it has one; without one, with CONFIG_INPUT_INJECT, the samples
+ * written are given to the readers as the driver's own (one point each).
  *
  * Data read from the touchscreen device consists only of touch events and
  * touch sample data.  This is reflected by struct touch_sample_s.  This

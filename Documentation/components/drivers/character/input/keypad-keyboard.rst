@@ -59,6 +59,14 @@ Do not store the driver state in ``lower.priv``. ``keyboard_register()``
 overwrites that field with the upper half's own state, so a lower half
 callback recovers the driver state with ``container_of()`` instead.
 
+A ``write()`` to the device goes to the lower half's write callback.
+Without one, and with ``CONFIG_INPUT_INJECT``, the upper half takes whole
+``struct keyboard_event_s`` records written to it and gives them to every
+reader as the driver's own events: keys injected in place of a person,
+for tests. Any task that can open the device can then inject keys, so the
+option is for developers' and test images only. Touchscreens take
+one-point ``struct touch_sample_s`` records the same way.
+
 Reporting the Right Event Type
 ------------------------------
 

@@ -118,6 +118,19 @@ config INPUT_KEYBOARD_BYTESTREAM
 		to mix a byte stream consumer and an event consumer in the same
 		configuration.
 
+config INPUT_INJECT
+	bool "Events written to an input device reach its readers"
+	default n
+	depends on INPUT_KEYBOARD || INPUT_TOUCHSCREEN
+	---help---
+		A keyboard or a touchscreen whose lower half has no write method
+		takes whole struct keyboard_event_s, or one-point struct
+		touch_sample_s, records written to its device, and gives them to
+		every reader as the driver's own events: input injected in place
+		of a person, for tests.  Any task that can open the device for
+		writing can then inject keys and touches: turn it on for
+		developers' and test images only.
+
 config INPUT_UINPUT
 	bool
 	default n
