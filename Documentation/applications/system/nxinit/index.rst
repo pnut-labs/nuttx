@@ -169,6 +169,20 @@ stopped, and ``SIGKILL`` if it has not exited
 (200 by default): a service that saves its state as it stops needs as long
 as that takes.
 
+A service that exits on its own is started again ``restart_period``
+milliseconds after it was started. One declared with ``oneshot`` is not,
+and is removed once it has exited. One declared with ``norestart`` is not
+restarted either, nor tried again when its start fails, but kept: it is
+``stopped`` until it is started again, by name (``start`` in ``init.rc``,
+or ``svc start``) or with its class (``class_start``). An app that is
+closed, and opened again later, is such a service.
+
+A service's name, and a class's, is at most 63 bytes long
+(``NXINIT_SERVICE_NAME_MAX`` less its NUL), enough for a reverse-DNS id
+such as ``org.example.messages``; a longer one is an error, and NXInit
+stops at it. Its whole declaration must still fit a line of ``init.rc``,
+``CONFIG_SYSTEM_NXINIT_RC_LINE_MAX`` bytes (128 by default).
+
 The Control Socket
 ==================
 
@@ -197,7 +211,8 @@ Command                Answer
 The pid is 0 when the service is not running. On a connection that
 watches, an event line may come at any time, also between a command and its
 answer; the n lines after ``ok <n>`` come together. Lines are shorter than
-80 characters; a longer command is answered ``error 7 line too long`` and
+128 characters, enough to name a service of the longest name; a longer
+command is answered ``error 7 line too long`` and
 the connection closed. NXInit never waits on a client: one that does not
 read what it is sent is closed, and one more than
 ``CONFIG_SYSTEM_NXINIT_CONTROL_CLIENTS`` gets ``error 16 too many
